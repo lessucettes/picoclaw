@@ -192,6 +192,28 @@ func mapPerplexityRecencyFilter(rangeCode string) string {
 	}
 }
 
+func mapParallelAfterDate(rangeCode string, now time.Time) string {
+	now = now.UTC()
+	var after time.Time
+	switch rangeCode {
+	case "d":
+		after = now.AddDate(0, 0, -1)
+	case "w":
+		after = now.AddDate(0, 0, -7)
+	case "m":
+		targetMonth := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+		lastDay := targetMonth.AddDate(0, 1, -1).Day()
+		after = time.Date(targetMonth.Year(), targetMonth.Month(), min(now.Day(), lastDay), 0, 0, 0, 0, time.UTC)
+	case "y":
+		targetYear := now.Year() - 1
+		lastDay := time.Date(targetYear, now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		after = time.Date(targetYear, now.Month(), min(now.Day(), lastDay), 0, 0, 0, 0, time.UTC)
+	default:
+		return ""
+	}
+	return after.Format("2006-01-02")
+}
+
 func mapDuckDuckGoDateFilter(rangeCode string) string {
 	switch rangeCode {
 	case "d":
@@ -534,6 +556,9 @@ func (p *ParallelSearchProvider) Search(ctx context.Context, query string, count
 		"mode":              "fast",
 		"max_chars_total":   5000,
 		"advanced_settings": settings,
+	}
+	if after := mapParallelAfterDate(rangeCode, time.Now().UTC()); after != "" {
+		settings["source_policy"] = map[string]string{"after_date": after}
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

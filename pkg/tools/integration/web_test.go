@@ -2504,3 +2504,127 @@ func TestParallelSearchSelection(t *testing.T) {
 		t.Fatalf("NewWebSearchTool() = (%v, %v), want (nil, nil) when Parallel has no key", tool, err)
 	}
 }
+
+func TestParallelAfterDate(t *testing.T) {
+	now := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	for code, want := range map[string]string{
+		"":  "",
+		"d": "2026-09-22",
+		"w": "2026-09-16",
+		"m": "2026-08-23",
+		"y": "2025-09-23",
+	} {
+		if got := mapParallelAfterDate(code, now); got != want {
+			t.Errorf("range %q: got %q, want %q", code, got, want)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		code string
+		want string
+	}{
+		{name: "month end", now: time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC), code: "m", want: "2026-02-28"},
+		{name: "leap month end", now: time.Date(2024, 3, 31, 0, 0, 0, 0, time.UTC), code: "m", want: "2024-02-29"},
+		{name: "leap year", now: time.Date(2024, 2, 29, 0, 0, 0, 0, time.UTC), code: "y", want: "2023-02-28"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapParallelAfterDate(tc.code, tc.now); got != tc.want {
+				t.Errorf("range %q at %s: got %q, want %q", tc.code, tc.now.Format(time.RFC3339), got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParallelSearchRangeAndCaps(t *testing.T) {
+	rangeDate := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Queries  []string `json:"search_queries"`
+			Advanced struct {
+				MaxResults   int `json:"max_results"`
+				SourcePolicy *struct {
+					AfterDate string `json:"after_date"`
+				} `json:"source_policy"`
+			} `json:"advanced_settings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if request.Advanced.MaxResults != 3 {
+			t.Errorf("max_results = %d, want 3", request.Advanced.MaxResults)
+		}
+		if len(request.Queries) != 1 {
+			t.Errorf("search_queries = %v, want one query", request.Queries)
+		} else if request.Queries[0] == "recent changes" {
+			if request.Advanced.SourcePolicy == nil {
+				t.Error("range request omitted source_policy")
+				rangeDate <- ""
+			} else {
+				rangeDate <- request.Advanced.SourcePolicy.AfterDate
+			}
+		} else if request.Queries[0] == "unfiltered" && request.Advanced.SourcePolicy != nil {
+			t.Errorf("unfiltered request included source_policy: %+v", request.Advanced.SourcePolicy)
+		}
+
+		results := make([]map[string]any, 4)
+		for i := range 4 {
+			results[i] = map[string]any{
+				"url":      fmt.Sprintf("https://example.org/%d", i+1),
+				"title":    fmt.Sprintf("Result %d", i+1),
+				"excerpts": []string{strings.Repeat("界", 2000), "second excerpt"},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"results": results}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	tool, err := NewWebSearchTool(WebSearchToolOptions{
+		Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: []string{"test-key"},
+		ParallelBaseURL: server.URL, ParallelMaxResults: 3,
+	})
+	if err != nil || tool == nil {
+		t.Fatalf("NewWebSearchTool() = (%v, %v)", tool, err)
+	}
+
+	start := time.Now().UTC()
+	ranged := tool.Execute(context.Background(), map[string]any{"query": "recent changes", "count": float64(10), "range": "w"})
+	end := time.Now().UTC()
+	if ranged.IsError {
+		t.Fatalf("range search failed: %s", ranged.ForLLM)
+	}
+	gotDate := <-rangeDate
+	wantStart := start.AddDate(0, 0, -7).Format("2006-01-02")
+	wantEnd := end.AddDate(0, 0, -7).Format("2006-01-02")
+	if gotDate != wantStart && gotDate != wantEnd {
+		t.Fatalf("after_date = %q, want %q or %q", gotDate, wantStart, wantEnd)
+	}
+	if got := strings.Count(ranged.ForLLM, "https://example.org/"); got != 3 {
+		t.Fatalf("rendered %d URLs, want 3", got)
+	}
+	snippets := 0
+	for _, line := range strings.Split(ranged.ForLLM, "\n") {
+		if !strings.HasPrefix(line, "   ") {
+			continue
+		}
+		text := strings.TrimSpace(line)
+		if strings.HasPrefix(text, "https://example.org/") || text == "" {
+			continue
+		}
+		snippets++
+		if got := len([]rune(text)); got > parallelExcerptLimit {
+			t.Errorf("excerpt has %d Unicode characters, want at most %d", got, parallelExcerptLimit)
+		}
+	}
+	if snippets != 3 {
+		t.Fatalf("rendered %d snippets, want 3", snippets)
+	}
+
+	unfiltered := tool.Execute(context.Background(), map[string]any{"query": "unfiltered"})
+	if unfiltered.IsError {
+		t.Fatalf("unfiltered search failed: %s", unfiltered.ForLLM)
+	}
+}
