@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
@@ -2414,4 +2415,92 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+func TestParallelSearchRequestAndResult(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/search" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("x-api-key") != "test-parallel-key" || r.Header.Get("Content-Type") != "application/json" {
+			t.Error("missing auth or content type")
+		}
+		var body struct {
+			Objective string   `json:"objective"`
+			Queries   []string `json:"search_queries"`
+			Mode      string   `json:"mode"`
+			Total     int      `json:"max_chars_total"`
+			Advanced  struct {
+				Max     int `json:"max_results"`
+				Excerpt struct {
+					Per int `json:"max_chars_per_result"`
+				} `json:"excerpt_settings"`
+			} `json:"advanced_settings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Objective != "PicoClaw Parallel Search" || len(body.Queries) != 1 || body.Queries[0] != body.Objective || body.Mode != "fast" || body.Total != 5000 || body.Advanced.Max != 2 || body.Advanced.Excerpt.Per != 1000 {
+			t.Errorf("unexpected search payload: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"url":"https://example.org/a","title":"Result A","excerpts":["First excerpt","Second excerpt"]},{"url":"https://example.org/b","title":"Result B","excerpts":["Another excerpt"]}]}`))
+	}))
+	defer ts.Close()
+
+	tool, err := NewWebSearchTool(WebSearchToolOptions{Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: []string{"test-parallel-key"}, ParallelBaseURL: ts.URL + "/v1/search", ParallelMaxResults: 5})
+	if err != nil || tool == nil {
+		t.Fatalf("tool = %v, err = %v", tool, err)
+	}
+	if tool.Name() != "web_search" {
+		t.Fatalf("tool name = %s", tool.Name())
+	}
+	out := tool.Execute(context.Background(), map[string]any{"query": "PicoClaw Parallel Search", "count": float64(2)})
+	if out.IsError || !strings.Contains(out.ForLLM, "via Parallel") || !strings.Contains(out.ForLLM, "https://example.org/a") || !strings.Contains(out.ForLLM, "First excerpt Second excerpt") {
+		t.Fatalf("search result: %s", out.ForLLM)
+	}
+}
+
+func TestParallelSearchSelection(t *testing.T) {
+	cfg := config.DefaultConfig()
+	resolve := func(opts WebSearchToolOptions, want string) {
+		t.Helper()
+		got, err := ResolveWebSearchProviderName(opts, "search query")
+		if err != nil {
+			t.Fatalf("ResolveWebSearchProviderName() error: %v", err)
+		}
+		if got != want {
+			t.Fatalf("ResolveWebSearchProviderName() = %q, want %q", got, want)
+		}
+	}
+
+	opts := WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "sogou")
+
+	cfg.Tools.Web.Parallel.Enabled = true
+	opts = WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "sogou")
+
+	cfg.Tools.Web.Parallel.SetAPIKeys([]string{"parallel-key"})
+	cfg.Tools.Web.Brave.Enabled = true
+	cfg.Tools.Web.Brave.SetAPIKeys([]string{"brave-key"})
+	opts = WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "brave")
+
+	cfg.Tools.Web.Brave.Enabled = false
+	opts = WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "parallel")
+
+	cfg.Tools.Web.Provider = "parallel"
+	opts = WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "parallel")
+
+	cfg.Tools.Web.Parallel.SetAPIKeys(nil)
+	opts = WebSearchToolOptionsFromConfig(cfg)
+	resolve(opts, "sogou")
+
+	tool, err := NewWebSearchTool(WebSearchToolOptions{Provider: "parallel", ParallelEnabled: true})
+	if err != nil || tool != nil {
+		t.Fatalf("NewWebSearchTool() = (%v, %v), want (nil, nil) when Parallel has no key", tool, err)
+	}
 }

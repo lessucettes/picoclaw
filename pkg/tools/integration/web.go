@@ -501,6 +501,124 @@ func (p *TavilySearchProvider) Search(
 	return "", fmt.Errorf("all api keys failed, last error: %w", lastErr)
 }
 
+const (
+	parallelResponseLimit = 1 << 20
+	parallelExcerptLimit  = 1000
+)
+
+type ParallelSearchProvider struct {
+	keyPool *APIKeyPool
+	baseURL string
+	client  *http.Client
+}
+
+func (p *ParallelSearchProvider) Search(ctx context.Context, query string, count int, rangeCode string) (string, error) {
+	if p.keyPool == nil || len(p.keyPool.keys) == 0 {
+		return "", errors.New("no API key provided")
+	}
+	count = min(max(count, 1), 10)
+
+	endpoint := p.baseURL
+	if endpoint == "" {
+		endpoint = "https://api.parallel.ai/v1/search"
+	}
+	settings := map[string]any{
+		"max_results": count,
+		"excerpt_settings": map[string]int{
+			"max_chars_per_result": parallelExcerptLimit,
+		},
+	}
+	payload := map[string]any{
+		"objective":         query,
+		"search_queries":    []string{query},
+		"mode":              "fast",
+		"max_chars_total":   5000,
+		"advanced_settings": settings,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal Parallel search request: %w", err)
+	}
+
+	var lastErr error
+	iter := p.keyPool.NewIterator()
+	for {
+		key, ok := iter.Next()
+		if !ok {
+			break
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+		if err != nil {
+			return "", fmt.Errorf("failed to create Parallel search request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", key)
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			lastErr = fmt.Errorf("Parallel request failed: %w", err)
+			continue
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, parallelResponseLimit+1))
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read Parallel response: %w", err)
+			continue
+		}
+		if len(body) > parallelResponseLimit {
+			return "", errors.New("Parallel response exceeds size limit")
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("Parallel API error (status %d)", resp.StatusCode)
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode >= 500 {
+				continue
+			}
+			return "", lastErr
+		}
+
+		var parsed struct {
+			Results []struct {
+				URL      string   `json:"url"`
+				Title    string   `json:"title"`
+				Excerpts []string `json:"excerpts"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return "", fmt.Errorf("failed to parse Parallel response: %w", err)
+		}
+		if parsed.Results == nil {
+			return "", errors.New("Parallel response missing results")
+		}
+		if len(parsed.Results) == 0 {
+			return fmt.Sprintf("No results for: %s", query), nil
+		}
+
+		lines := []string{fmt.Sprintf("Results for: %s (via Parallel)", query)}
+		for i, item := range parsed.Results {
+			if i >= count {
+				break
+			}
+			title := item.Title
+			if title == "" {
+				title = item.URL
+			}
+			lines = append(lines, fmt.Sprintf("%d. %s\n   %s", i+1, title, item.URL))
+			excerpt := []rune(strings.Join(strings.Fields(strings.Join(item.Excerpts, " ")), " "))
+			if len(excerpt) > parallelExcerptLimit {
+				excerpt = excerpt[:parallelExcerptLimit]
+			}
+			if len(excerpt) > 0 {
+				lines = append(lines, "   "+string(excerpt))
+			}
+		}
+		return strings.Join(lines, "\n"), nil
+	}
+	return "", fmt.Errorf("all Parallel API keys failed: %w", lastErr)
+}
+
 type KagiSearchProvider struct {
 	keyPool *APIKeyPool
 	baseURL string
@@ -1476,6 +1594,10 @@ type WebSearchToolOptions struct {
 	KagiBaseURL           string
 	KagiMaxResults        int
 	KagiEnabled           bool
+	ParallelAPIKeys       []string
+	ParallelBaseURL       string
+	ParallelMaxResults    int
+	ParallelEnabled       bool
 	SogouMaxResults       int
 	SogouEnabled          bool
 	DuckDuckGoMaxResults  int
@@ -1516,6 +1638,10 @@ func WebSearchToolOptionsFromConfig(cfg *config.Config) WebSearchToolOptions {
 		KagiBaseURL:           cfg.Tools.Web.Kagi.BaseURL,
 		KagiMaxResults:        cfg.Tools.Web.Kagi.MaxResults,
 		KagiEnabled:           cfg.Tools.Web.Kagi.Enabled,
+		ParallelAPIKeys:       cfg.Tools.Web.Parallel.APIKeys.Values(),
+		ParallelBaseURL:       cfg.Tools.Web.Parallel.BaseURL,
+		ParallelMaxResults:    cfg.Tools.Web.Parallel.MaxResults,
+		ParallelEnabled:       cfg.Tools.Web.Parallel.Enabled,
 		SogouMaxResults:       cfg.Tools.Web.Sogou.MaxResults,
 		SogouEnabled:          cfg.Tools.Web.Sogou.Enabled,
 		DuckDuckGoMaxResults:  cfg.Tools.Web.DuckDuckGo.MaxResults,
@@ -1559,12 +1685,13 @@ var (
 		"brave",
 		"tavily",
 		"kagi",
+		"parallel",
 		"perplexity",
 		"searxng",
 		"glm_search",
 		"baidu_search",
 	}
-	autoPrimaryWebSearchProviders  = []string{"perplexity", "brave", "kagi", "searxng", "tavily", "gemini"}
+	autoPrimaryWebSearchProviders  = []string{"perplexity", "brave", "kagi", "searxng", "tavily", "gemini", "parallel"}
 	autoFallbackWebSearchProviders = []string{"baidu_search", "glm_search"}
 )
 
@@ -1592,6 +1719,8 @@ func (opts WebSearchToolOptions) providerReady(name string) bool {
 		return opts.TavilyEnabled && len(opts.TavilyAPIKeys) > 0
 	case "kagi":
 		return opts.KagiEnabled && len(opts.KagiAPIKeys) > 0
+	case "parallel":
+		return opts.ParallelEnabled && len(opts.ParallelAPIKeys) > 0
 	case "perplexity":
 		return opts.PerplexityEnabled && len(opts.PerplexityAPIKeys) > 0
 	case "searxng":
@@ -1757,6 +1886,26 @@ func (opts WebSearchToolOptions) providerByName(name string) (SearchProvider, in
 			keyPool: NewAPIKeyPool(opts.TavilyAPIKeys),
 			baseURL: opts.TavilyBaseURL,
 			proxy:   opts.Proxy,
+			client:  client,
+		}, maxResults, nil
+	case "parallel":
+		if !opts.providerReady("parallel") {
+			return nil, 0, nil
+		}
+		client, err := utils.CreateHTTPClient(opts.Proxy, searchTimeout)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create HTTP client for Parallel: %w", err)
+		}
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		maxResults := 10
+		if opts.ParallelMaxResults > 0 {
+			maxResults = min(opts.ParallelMaxResults, 10)
+		}
+		return &ParallelSearchProvider{
+			keyPool: NewAPIKeyPool(opts.ParallelAPIKeys),
+			baseURL: opts.ParallelBaseURL,
 			client:  client,
 		}, maxResults, nil
 	case "kagi":
