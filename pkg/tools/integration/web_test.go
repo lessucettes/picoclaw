@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1162,6 +1163,35 @@ func TestNewWebSearchTool_PropagatesProxy(t *testing.T) {
 			t.Fatalf("client.Transport type = %T, want *http.Transport", p.client.Transport)
 		}
 		req, err := http.NewRequest(http.MethodGet, "https://searx.example.com/search", nil)
+		if err != nil {
+			t.Fatalf("http.NewRequest() error: %v", err)
+		}
+		proxyURL, err := tr.Proxy(req)
+		if err != nil {
+			t.Fatalf("transport.Proxy(req) error: %v", err)
+		}
+		if proxyURL == nil || proxyURL.String() != "http://127.0.0.1:7890" {
+			t.Fatalf("proxy URL = %v, want %q", proxyURL, "http://127.0.0.1:7890")
+		}
+	})
+
+	t.Run("parallel", func(t *testing.T) {
+		tool, err := NewWebSearchTool(WebSearchToolOptions{
+			Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: []string{"k"},
+			ParallelMaxResults: 3, Proxy: "http://127.0.0.1:7890",
+		})
+		if err != nil {
+			t.Fatalf("NewWebSearchTool() error: %v", err)
+		}
+		p, ok := tool.provider.(*ParallelSearchProvider)
+		if !ok {
+			t.Fatalf("provider type = %T, want *ParallelSearchProvider", tool.provider)
+		}
+		tr, ok := p.client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("client.Transport type = %T, want *http.Transport", p.client.Transport)
+		}
+		req, err := http.NewRequest(http.MethodPost, "https://api.parallel.ai/v1/search", nil)
 		if err != nil {
 			t.Fatalf("http.NewRequest() error: %v", err)
 		}
@@ -2627,4 +2657,131 @@ func TestParallelSearchRangeAndCaps(t *testing.T) {
 	if unfiltered.IsError {
 		t.Fatalf("unfiltered search failed: %s", unfiltered.ForLLM)
 	}
+}
+
+func TestParallelSearchFailures(t *testing.T) {
+	const successResponse = `{"results":[{"url":"https://example.org/success","title":"Success","excerpts":["ok"]}]}`
+	defaultKeys := []string{"test-parallel-key-one", "test-parallel-key-two"}
+	tests := []struct {
+		name          string
+		status        int
+		body          string
+		retryThenOK   bool
+		keys          []string
+		wantRequests  int32
+		wantError     bool
+		wantNoResults bool
+	}{
+		{name: "retry 429", status: http.StatusTooManyRequests, retryThenOK: true, wantRequests: 2},
+		{name: "retry 401", status: http.StatusUnauthorized, retryThenOK: true, wantRequests: 2},
+		{name: "retry 403", status: http.StatusForbidden, retryThenOK: true, wantRequests: 2},
+		{name: "retry 500", status: http.StatusInternalServerError, retryThenOK: true, wantRequests: 2},
+		{name: "400 is not retried", status: http.StatusBadRequest, body: `{"error":"test-parallel-key-one"}`, wantRequests: 1, wantError: true},
+		{name: "all keys exhausted", status: http.StatusInternalServerError, body: `{"error":"test-parallel-key-one"}`, wantRequests: 2, wantError: true},
+		{name: "malformed JSON", status: http.StatusOK, body: "not-json", wantRequests: 1, wantError: true},
+		{name: "missing results", status: http.StatusOK, body: `{"warnings":[]}`, wantRequests: 1, wantError: true},
+		{name: "empty results", status: http.StatusOK, body: `{"results":[]}`, wantRequests: 1, wantNoResults: true},
+		{name: "error body cannot leak key", status: http.StatusUnauthorized, body: `{"error":"test-parallel-key-one"}`, keys: []string{"test-parallel-key-one"}, wantRequests: 1, wantError: true},
+		{name: "response size is bounded", status: http.StatusOK, body: strings.Repeat("x", parallelResponseLimit+1), wantRequests: 1, wantError: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				status, body := tc.status, tc.body
+				if tc.retryThenOK && n > 1 {
+					status, body = http.StatusOK, successResponse
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			keys := tc.keys
+			if keys == nil {
+				keys = defaultKeys
+			}
+			tool, err := NewWebSearchTool(WebSearchToolOptions{
+				Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: keys,
+				ParallelBaseURL: server.URL, ParallelMaxResults: 5,
+			})
+			if err != nil || tool == nil {
+				t.Fatalf("NewWebSearchTool() = (%v, %v)", tool, err)
+			}
+			result := tool.Execute(context.Background(), map[string]any{"query": "failure test"})
+			if requests.Load() != tc.wantRequests {
+				t.Errorf("request count = %d, want %d", requests.Load(), tc.wantRequests)
+			}
+			if result.IsError != tc.wantError {
+				t.Fatalf("IsError = %v, want %v; result: %s", result.IsError, tc.wantError, result.ForLLM)
+			}
+			if tc.wantNoResults && !strings.Contains(result.ForLLM, "No results for: failure test") {
+				t.Errorf("empty result message = %q", result.ForLLM)
+			}
+			if tc.wantError {
+				for _, key := range keys {
+					if strings.Contains(result.ForLLM, key) || strings.Contains(result.ForUser, key) {
+						t.Errorf("error output leaked an API key: %q", key)
+					}
+				}
+			}
+		})
+	}
+
+	t.Run("cancellation stops key failover", func(t *testing.T) {
+		var requests atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			_, _ = w.Write([]byte(successResponse))
+		}))
+		defer server.Close()
+		tool, err := NewWebSearchTool(WebSearchToolOptions{
+			Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: defaultKeys,
+			ParallelBaseURL: server.URL,
+		})
+		if err != nil || tool == nil {
+			t.Fatalf("NewWebSearchTool() = (%v, %v)", tool, err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err = tool.provider.Search(ctx, "cancel", 1, "")
+		if err != context.Canceled {
+			t.Fatalf("Search() error = %v, want context.Canceled", err)
+		}
+		if requests.Load() != 0 {
+			t.Fatalf("sent %d requests with an already-canceled context", requests.Load())
+		}
+	})
+
+	t.Run("redirect does not forward API key", func(t *testing.T) {
+		var targetRequests atomic.Int32
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetRequests.Add(1)
+			if r.Header.Get("x-api-key") != "" {
+				t.Error("redirect target received x-api-key")
+			}
+		}))
+		defer target.Close()
+		redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL, http.StatusFound)
+		}))
+		defer redirect.Close()
+		tool, err := NewWebSearchTool(WebSearchToolOptions{
+			Provider: "parallel", ParallelEnabled: true, ParallelAPIKeys: defaultKeys,
+			ParallelBaseURL: redirect.URL,
+		})
+		if err != nil || tool == nil {
+			t.Fatalf("NewWebSearchTool() = (%v, %v)", tool, err)
+		}
+		_, err = tool.provider.Search(context.Background(), "redirect", 1, "")
+		if err == nil {
+			t.Fatal("Search() error = nil, want redirect status error")
+		}
+		if targetRequests.Load() != 0 {
+			t.Fatalf("redirect target received %d requests", targetRequests.Load())
+		}
+	})
 }
