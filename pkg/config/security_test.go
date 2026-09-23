@@ -270,3 +270,22 @@ skills:
 		assert.Equal(t, "abc", envCfg.Tools.Web.Brave.APIKeys[1].raw)
 	})
 }
+
+func TestParallelWebConfigEnvironment(t *testing.T) {
+	cfg := DefaultConfig()
+	t.Setenv("PICOCLAW_TOOLS_WEB_PARALLEL_ENABLED", "true")
+	t.Setenv("PICOCLAW_TOOLS_WEB_PARALLEL_API_KEYS", "parallel-env-key-1,parallel-env-key-2")
+	t.Setenv("PICOCLAW_TOOLS_WEB_PARALLEL_BASE_URL", "https://parallel.example/search")
+	t.Setenv("PICOCLAW_TOOLS_WEB_PARALLEL_MAX_RESULTS", "8")
+
+	if err := env.Parse(cfg); err != nil {
+		t.Fatalf("env.Parse() error: %v", err)
+	}
+	if !cfg.Tools.Web.Parallel.Enabled || cfg.Tools.Web.Parallel.BaseURL != "https://parallel.example/search" || cfg.Tools.Web.Parallel.MaxResults != 8 {
+		t.Fatalf("Parallel config environment values not loaded: %+v", cfg.Tools.Web.Parallel)
+	}
+	keys := cfg.Tools.Web.Parallel.APIKeys.Values()
+	if len(keys) != 2 || keys[0] != "parallel-env-key-1" || keys[1] != "parallel-env-key-2" {
+		t.Fatalf("Parallel API keys from environment = %v", keys)
+	}
+}
