@@ -3270,3 +3270,51 @@ func testChannelsConfigWithTokens() ChannelsConfig {
 	}
 	return channels
 }
+
+func TestParallelWebConfigDefaultsAndSecrets(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Tools.Web.Parallel.Enabled || cfg.Tools.Web.Parallel.MaxResults != 5 || cfg.Tools.Web.Parallel.BaseURL != "https://api.parallel.ai/v1/search" {
+		t.Fatalf("unexpected parallel defaults: %+v", cfg.Tools.Web.Parallel)
+	}
+	cfg.Tools.Web.Parallel.SetAPIKeys([]string{"parallel-test-secret-1", "parallel-test-secret-2"})
+	if got := cfg.Tools.Web.Parallel.APIKeys.Values(); len(got) != 2 || got[1] != "parallel-test-secret-2" {
+		t.Fatalf("unexpected parallel key pool size/order")
+	}
+	encoded, err := json.Marshal(cfg.Tools.Web)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "parallel-test-secret") {
+		t.Fatal("web config JSON leaked a key")
+	}
+	if got := cfg.FilterSensitiveData("key=parallel-test-secret-1"); strings.Contains(got, "parallel-test-secret-1") {
+		t.Fatal("parallel key not redacted")
+	}
+}
+
+func TestParallelWebConfigRoundTrip(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools.Web.Parallel.Enabled = true
+	cfg.Tools.Web.Parallel.MaxResults = 7
+	cfg.Tools.Web.Parallel.BaseURL = "https://parallel.example/search"
+	cfg.Tools.Web.Parallel.SetAPIKeys([]string{"parallel-roundtrip-secret"})
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error: %v", err)
+	}
+	loaded, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !loaded.Tools.Web.Parallel.Enabled || loaded.Tools.Web.Parallel.MaxResults != 7 || loaded.Tools.Web.Parallel.BaseURL != "https://parallel.example/search" {
+		t.Fatalf("Parallel config did not round-trip: %+v", loaded.Tools.Web.Parallel)
+	}
+	keys := loaded.Tools.Web.Parallel.APIKeys.Values()
+	if len(keys) != 1 || keys[0] != "parallel-roundtrip-secret" {
+		t.Fatalf("Parallel API keys did not round-trip")
+	}
+	if got := loaded.FilterSensitiveData("secret=parallel-roundtrip-secret"); strings.Contains(got, "parallel-roundtrip-secret") {
+		t.Fatal("Parallel API key not redacted after config load")
+	}
+}
