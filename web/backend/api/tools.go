@@ -478,6 +478,14 @@ func (h *Handler) handleUpdateWebSearchConfig(w http.ResponseWriter, r *http.Req
 			cfg.Tools.Web.Kagi.SetAPIKeys(keys)
 		}
 	}
+	if settings, ok := req.Settings["parallel"]; ok {
+		cfg.Tools.Web.Parallel.Enabled = settings.Enabled
+		cfg.Tools.Web.Parallel.MaxResults = settings.MaxResults
+		cfg.Tools.Web.Parallel.BaseURL = strings.TrimSpace(settings.BaseURL)
+		if keys, ok := normalizeWebSearchAPIKeys(settings.APIKeys, settings.APIKey); ok {
+			cfg.Tools.Web.Parallel.SetAPIKeys(keys)
+		}
+	}
 	if settings, ok := req.Settings["perplexity"]; ok {
 		cfg.Tools.Web.Perplexity.Enabled = settings.Enabled
 		cfg.Tools.Web.Perplexity.MaxResults = settings.MaxResults
@@ -526,6 +534,7 @@ func normalizeWebSearchProvider(provider string) string {
 		"brave",
 		"tavily",
 		"kagi",
+		"parallel",
 		"duckduckgo",
 		"gemini",
 		"perplexity",
@@ -598,6 +607,12 @@ func buildWebSearchConfigResponse(cfg *config.Config) webSearchConfigResponse {
 			BaseURL:    cfg.Tools.Web.Kagi.BaseURL,
 			APIKeySet:  len(cfg.Tools.Web.Kagi.APIKeys.Values()) > 0,
 		},
+		"parallel": {
+			Enabled:    cfg.Tools.Web.Parallel.Enabled,
+			MaxResults: cfg.Tools.Web.Parallel.MaxResults,
+			BaseURL:    cfg.Tools.Web.Parallel.BaseURL,
+			APIKeySet:  len(cfg.Tools.Web.Parallel.APIKeys.Values()) > 0,
+		},
 		"perplexity": {
 			Enabled:    cfg.Tools.Web.Perplexity.Enabled,
 			MaxResults: cfg.Tools.Web.Perplexity.MaxResults,
@@ -668,6 +683,13 @@ func buildWebSearchConfigResponse(cfg *config.Config) webSearchConfigResponse {
 			Label:        "Kagi Search",
 			Configured:   picotools.WebSearchProviderReady(opts, "kagi"),
 			Current:      current == "kagi",
+			RequiresAuth: true,
+		},
+		{
+			ID:           "parallel",
+			Label:        "Parallel Search",
+			Configured:   picotools.WebSearchProviderReady(opts, "parallel"),
+			Current:      current == "parallel",
 			RequiresAuth: true,
 		},
 		{

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -600,5 +601,100 @@ func TestResolveCurrentWebSearchProvider_IgnoresPreferNativeInConfigView(t *test
 
 	if got := resolveCurrentWebSearchProvider(cfg); got != "" {
 		t.Fatalf("resolveCurrentWebSearchProvider() = %q, want empty when only native search would be available", got)
+	}
+}
+
+func TestWebSearchParallelConfig(t *testing.T) {
+	if got := normalizeWebSearchProvider("parallel"); got != "parallel" {
+		t.Fatalf("normalizeWebSearchProvider(parallel) = %q, want parallel", got)
+	}
+
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	getConfig := func() (webSearchConfigResponse, string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tools/web-search-config", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var response webSearchConfigResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode GET response: %v", err)
+		}
+		return response, rec.Body.String()
+	}
+	putConfig := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/tools/web-search-config", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		return rec
+	}
+
+	response, body := getConfig()
+	if _, ok := response.Settings["parallel"]; !ok {
+		t.Fatalf("GET settings omitted parallel: %s", body)
+	}
+	foundProvider := false
+	for _, provider := range response.Providers {
+		if provider.ID == "parallel" {
+			foundProvider = true
+			if !provider.RequiresAuth {
+				t.Fatal("Parallel provider should require authentication")
+			}
+		}
+	}
+	if !foundProvider {
+		t.Fatal("GET providers omitted parallel")
+	}
+
+	const apiKey = "parallel-ui-test-key"
+	const settings = `"enabled":true,"max_results":6,"base_url":"https://api.parallel.ai/v1/search"`
+	putConfig(`{"provider":"parallel","prefer_native":false,"proxy":"","settings":{"parallel":{` + settings + `,"api_keys":["` + apiKey + `"]}}}`)
+	updated, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() after key update: %v", err)
+	}
+	parallel := updated.Tools.Web.Parallel
+	if !parallel.Enabled || parallel.MaxResults != 6 || parallel.BaseURL != "https://api.parallel.ai/v1/search" {
+		t.Fatalf("Parallel config not updated: %+v", parallel)
+	}
+	if keys := parallel.APIKeys.Values(); len(keys) != 1 || keys[0] != apiKey {
+		t.Fatalf("Parallel API keys not updated")
+	}
+	response, body = getConfig()
+	if !response.Settings["parallel"].APIKeySet || strings.Contains(body, apiKey) {
+		t.Fatalf("GET should expose only api_key_set, body=%s", body)
+	}
+
+	putConfig(`{"provider":"parallel","prefer_native":false,"proxy":"","settings":{"parallel":{` + settings + `}}}`)
+	updated, err = config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() after preserving keys: %v", err)
+	}
+	if keys := updated.Tools.Web.Parallel.APIKeys.Values(); len(keys) != 1 || keys[0] != apiKey {
+		t.Fatalf("Parallel API keys should be preserved, got %v", keys)
+	}
+
+	putConfig(`{"provider":"parallel","prefer_native":false,"proxy":"","settings":{"parallel":{` + settings + `,"api_keys":[]}}}`)
+	updated, err = config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() after clearing keys: %v", err)
+	}
+	if keys := updated.Tools.Web.Parallel.APIKeys.Values(); len(keys) != 0 {
+		t.Fatalf("Parallel API keys should be cleared, got %v", keys)
+	}
+	response, body = getConfig()
+	if response.Settings["parallel"].APIKeySet || strings.Contains(body, apiKey) {
+		t.Fatalf("GET should report no key and never expose key material, body=%s", body)
 	}
 }
