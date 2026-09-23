@@ -164,6 +164,53 @@ web:
 
 Kagi API usage may be billed or limited separately from a normal Kagi subscription, depending on your account and API setup.
 
+### Parallel Search
+
+Parallel Search uses the GA Search API at `POST https://api.parallel.ai/v1/search`. It returns ranked URLs and excerpts for PicoClaw's existing `web_search` tool; it does not change the tool schema or `web_fetch`.
+
+| Config         | Type     | Default                              | Description                              |
+|----------------|----------|--------------------------------------|------------------------------------------|
+| `enabled`      | bool     | false                                | Enable Parallel Search                  |
+| `api_keys`     | string[] | -                                    | Secure API keys used in rotation        |
+| `base_url`     | string   | `https://api.parallel.ai/v1/search`  | Parallel Search API endpoint            |
+| `max_results`  | int      | 5                                    | Result limit; `web_search` caps it at 10 |
+
+Configure the provider with `tools.web.provider: "parallel"` and `tools.web.parallel.enabled: true`:
+
+```json
+{
+  "tools": {
+    "web": {
+      "provider": "parallel",
+      "parallel": {
+        "enabled": true,
+        "max_results": 5,
+        "base_url": "https://api.parallel.ai/v1/search"
+      }
+    }
+  }
+}
+```
+
+Store keys in `.security.yml` rather than the regular config file:
+
+```yaml
+web:
+  parallel:
+    api_keys:
+      - "YOUR_PARALLEL_API_KEY"
+```
+
+Alternatively, set `PICOCLAW_TOOLS_WEB_PARALLEL_API_KEYS`; comma-separated values are accepted for key rotation. The optional `tools.web.proxy` setting is shared with other web tools. A custom `base_url` sends the `x-api-key` credential to that configured host.
+
+PicoClaw sends one query unchanged in both `objective` and `search_queries`, using Parallel's `fast` mode. Parallel recommends concise 3–6-word keyword queries (up to 200 characters); long or sentence-style PicoClaw queries may be rejected or produce a warning. Excerpts are bounded to 1,000 characters per result and 5,000 total characters. The `range` values `d`, `w`, `m`, and `y` map to `advanced_settings.source_policy.after_date`.
+
+In `provider: "auto"` mode, Parallel is available only when enabled and keyed. It is selected after all existing primary providers (Perplexity, Brave, Kagi, SearXNG, Tavily, and Gemini), and before Sogou/DuckDuckGo. The default remains disabled, so automatic selection is unchanged unless Parallel is configured.
+
+`prefer_native` controls the selected model's provider-native search, not Parallel. Set `tools.web.prefer_native: false` only when the selected model supports provider-native search and the user specifically wants PicoClaw's `web_search` tool.
+
+See Parallel's [Search modes](https://docs.parallel.ai/search/modes) and [advanced settings](https://docs.parallel.ai/search/advanced-search-settings) documentation.
+
 ### Tavily
 
 | Config        | Type   | Default | Description               |
