@@ -16,6 +16,7 @@
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai)                       |
 | `anthropic`  | LLM (Claude direct)                     | [console.anthropic.com](https://console.anthropic.com)       |
 | `openai`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)           |
+| `opencode-go` | LLM (OpenCode Go; Chat, Messages, and Responses models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
 | `venice`     | LLM (Venice AI direct)                  | [venice.ai](https://venice.ai)                               |
 | `nearai`     | LLM (NEAR AI Cloud TEE inference)       | [near.ai](https://near.ai)                                   |
 | `deepseek`   | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com)       |
@@ -74,6 +75,7 @@ This design also enables **multi-agent support** with flexible provider selectio
 | **LongCat**         | `longcat`         | `https://api.longcat.chat/openai`                   | OpenAI    | [Get Key](https://longcat.chat/platform)                         |
 | **ModelScope (魔搭)**| `modelscope`     | `https://api-inference.modelscope.cn/v1`            | OpenAI    | [Get Token](https://modelscope.cn/my/tokens)                     |
 | **Xiaomi MiMo**     | `mimo`            | `https://api.xiaomimimo.com/v1`                     | OpenAI    | [Get Key](https://platform.xiaomimimo.com)                       |
+| **OpenCode Go**     | `opencode-go`     | `https://opencode.ai/zen/go/v1`                     | By model  | [Go setup and subscription](https://opencode.ai/docs/go/)         |
 | **Azure OpenAI**    | `azure`           | `https://{resource}.openai.azure.com`               | Azure     | [Get Key](https://portal.azure.com)                              |
 | **Antigravity**     | `antigravity`     | Google Cloud                                        | Custom    | OAuth only                                                       |
 | **GitHub Copilot**  | `github-copilot`  | `localhost:4321`                                    | gRPC      | -                                                                |
@@ -347,6 +349,35 @@ For direct Anthropic API access or custom endpoints that only support Anthropic'
 > - The existing `anthropic` protocol returns 404 errors (indicating the endpoint doesn't support OpenAI-compatible format)
 >
 > **Note:** The `anthropic` protocol uses OpenAI-compatible format (`/v1/chat/completions`), while `anthropic-messages` uses Anthropic's native format (`/v1/messages`). Choose based on your endpoint's supported format.
+
+**OpenCode Go**
+
+OpenCode Go is a subscription service with a model catalog that uses different API protocols by model. See the [official Go documentation](https://opencode.ai/docs/go/) for subscription and account setup. Configure `OPENCODE_API_KEY` in the PicoClaw process environment:
+
+```sh
+export OPENCODE_API_KEY='your-opencode-go-key'
+```
+
+A complete configuration using the native provider ID is:
+
+```json
+{
+  "version": 3,
+  "agents": {"defaults": {"model_name": "go-kimi"}},
+  "model_list": [{
+    "model_name": "go-kimi",
+    "provider": "opencode-go",
+    "model": "kimi-k3",
+    "enabled": true
+  }]
+}
+```
+
+A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. Set `api_base` to override `https://opencode.ai/zen/go/v1`. Environment-only entries should set `"enabled": true` explicitly.
+
+OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch reads `/models`, but that catalog does not establish a model's protocol family.
+
+PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Responses and Messages requests are currently non-streaming.
 
 **Ollama (local)**
 

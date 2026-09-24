@@ -104,6 +104,12 @@
       "model": "openai/gpt-5.4",
       "api_keys": ["sk-key2"],
       "api_base": "https://api2.example.com/v1"
+    },
+    {
+      "model_name": "opencode-go-kimi",
+      "provider": "opencode-go",
+      "model": "kimi-k3",
+      "enabled": false
     }
   ],
   "channel_list": {
