@@ -87,7 +87,7 @@ func (s *modelProbeCacheState) resetForTest() {
 func hasModelConfiguration(m *config.ModelConfig) bool {
 	protocol := modelProtocol(m)
 	authMethod := strings.ToLower(strings.TrimSpace(m.AuthMethod))
-	apiKey := strings.TrimSpace(m.APIKey())
+	apiKeyConfigured := m.HasAPIKey()
 
 	usesStoredAuth := authMethod == "oauth" || authMethod == "token"
 	if usesStoredAuth {
@@ -110,7 +110,7 @@ func hasModelConfiguration(m *config.ModelConfig) bool {
 		return true
 	}
 
-	if apiKey != "" {
+	if apiKeyConfigured {
 		return true
 	}
 	if usesStoredAuth {

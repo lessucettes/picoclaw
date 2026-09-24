@@ -451,7 +451,7 @@ func candidateCanInheritProvider(
 	modelCfg, err := resolvedCandidateModelConfig(cfg, candidate, workspace)
 	return err == nil &&
 		strings.TrimSpace(modelCfg.APIBase) == "" &&
-		modelCfg.APIKey() == "" &&
+		!modelCfg.HasAPIKey() &&
 		strings.TrimSpace(modelCfg.AuthMethod) == "" &&
 		strings.TrimSpace(modelCfg.ConnectMode) == ""
 }

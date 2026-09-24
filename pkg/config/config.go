@@ -822,15 +822,33 @@ type ModelConfig struct {
 	isVirtual bool
 }
 
-// APIKey returns the first API key from apiKeys
+// APIKey returns the first API key from apiKeys.
 func (c *ModelConfig) APIKey() string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys[0].String()
+	if c == nil || len(c.APIKeys) == 0 {
+		return ""
 	}
-	if c.Provider == "opencode-go" || (c.Provider == "" && strings.HasPrefix(c.Model, "opencode-go/")) {
-		return strings.TrimSpace(os.Getenv("OPENCODE_API_KEY"))
+	return c.APIKeys[0].String()
+}
+
+// HasAPIKey reports whether a stored API key exists, or whether the OpenCode Go
+// process environment provides one. It never returns the environment value.
+func (c *ModelConfig) HasAPIKey() bool {
+	if c == nil {
+		return false
 	}
-	return ""
+	if strings.TrimSpace(c.APIKey()) != "" {
+		return true
+	}
+
+	provider := strings.TrimSpace(c.Provider)
+	if provider == "" {
+		modelProvider, _, found := strings.Cut(strings.TrimSpace(c.Model), "/")
+		if !found {
+			return false
+		}
+		provider = modelProvider
+	}
+	return strings.EqualFold(provider, "opencode-go") && strings.TrimSpace(os.Getenv("OPENCODE_API_KEY")) != ""
 }
 
 // IsVirtual returns true if this model was generated from multi-key expansion.

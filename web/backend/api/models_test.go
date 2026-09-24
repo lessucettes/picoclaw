@@ -4101,3 +4101,60 @@ func TestHandleFetchModels_ModelIndexProviderMismatchRejectsKey(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(rec, req)
 }
+
+func TestOpenCodeGoEnvironmentKeyIsNotExposedOrPersistedByModelAPI(t *testing.T) {
+	const secret = "environment-only-test-secret"
+	t.Setenv("OPENCODE_API_KEY", secret)
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	writeModelChainConfig(t, configPath, []*config.ModelConfig{{
+		ModelName: "go-kimi",
+		Provider:  "opencode-go",
+		Model:     "kimi-k3",
+		Enabled:   true,
+	}}, "go-kimi", nil)
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/models status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listResponse struct {
+		Models []struct {
+			APIKey    string `json:"api_key"`
+			Available bool   `json:"available"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResponse); err != nil {
+		t.Fatalf("decode model list: %v", err)
+	}
+	if len(listResponse.Models) != 1 {
+		t.Fatalf("model count = %d, want 1", len(listResponse.Models))
+	}
+	if listResponse.Models[0].APIKey != "" || !listResponse.Models[0].Available || strings.Contains(listRec.Body.String(), secret) {
+		t.Fatalf("model list leaked or misreported environment-key model: %s", listRec.Body.String())
+	}
+
+	updated := updateModelAndLoadConfig(t, configPath, 0, `{
+		"model_name":"go-kimi",
+		"provider":"opencode-go",
+		"model":"kimi-k3",
+		"enabled":true
+	}`)
+	if got := len(updated.ModelList[0].APIKeys); got != 0 {
+		t.Fatalf("stored API key count after env-only update = %d, want 0", got)
+	}
+
+	securityConfig, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), config.SecurityConfigFile))
+	if err != nil {
+		t.Fatalf("read security config: %v", err)
+	}
+	if strings.Contains(string(securityConfig), secret) {
+		t.Fatal("environment key was persisted to the security config")
+	}
+}

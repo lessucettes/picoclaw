@@ -8,6 +8,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -228,7 +229,11 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		return finalizeProviderFromConfig(provider, modelID, cfg)
 
 	case "opencode-go":
-		if cfg.APIKey() == "" {
+		apiKey := cfg.APIKey()
+		if strings.TrimSpace(apiKey) == "" {
+			apiKey = strings.TrimSpace(os.Getenv("OPENCODE_API_KEY"))
+		}
+		if apiKey == "" {
 			return nil, "", fmt.Errorf("api_key or OPENCODE_API_KEY is required for opencode-go")
 		}
 		family := openCodeGoEndpointFamily(modelID)
@@ -238,11 +243,17 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		base := ResolveAPIBase(cfg)
 		switch family {
 		case "responses":
-			return finalizeProviderFromConfig(openairesponses.NewProvider(cfg.APIKey(), base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders), modelID, cfg)
+			provider := openairesponses.NewProviderWithSessionHeader(
+				apiKey, base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session",
+			)
+			return finalizeProviderFromConfig(provider, modelID, cfg)
 		case "messages":
-			return finalizeProviderFromConfig(anthropicmessages.NewProviderWithHeaders(cfg.APIKey(), base, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session"), modelID, cfg)
+			provider := anthropicmessages.NewProviderWithProxyAndHeaders(
+				apiKey, base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session",
+			)
+			return finalizeProviderFromConfig(provider, modelID, cfg)
 		default:
-			provider := openai_compat.NewProvider(cfg.APIKey(), base, cfg.Proxy,
+			provider := openai_compat.NewProvider(apiKey, base, cfg.Proxy,
 				openai_compat.WithProviderName(protocol), openai_compat.WithUserAgent(userAgent),
 				openai_compat.WithMaxTokensField(cfg.MaxTokensField),
 				openai_compat.WithRequestTimeout(time.Duration(cfg.RequestTimeout)*time.Second),

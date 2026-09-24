@@ -23,19 +23,32 @@ type Provider struct {
 	key, base, userAgent string
 	client               *http.Client
 	headers              map[string]string
+	sessionHeaderName    string
 }
 
+// NewProvider creates a Responses API provider using the OpenCode Go session header.
 func NewProvider(key, base, proxy, userAgent string, timeoutSeconds int, headers map[string]string) *Provider {
+	return NewProviderWithSessionHeader(key, base, proxy, userAgent, timeoutSeconds, headers, "x-opencode-session")
+}
+
+// NewProviderWithSessionHeader creates a Responses API provider with an optional session header.
+func NewProviderWithSessionHeader(
+	key, base, proxy, userAgent string,
+	timeoutSeconds int,
+	headers map[string]string,
+	sessionHeaderName string,
+) *Provider {
 	client := common.NewHTTPClient(proxy)
 	if timeoutSeconds > 0 {
 		client.Timeout = time.Duration(timeoutSeconds) * time.Second
 	}
 	return &Provider{
-		key:       key,
-		base:      strings.TrimRight(base, "/"),
-		userAgent: userAgent,
-		client:    client,
-		headers:   headers,
+		key:               key,
+		base:              strings.TrimRight(base, "/"),
+		userAgent:         userAgent,
+		client:            client,
+		headers:           headers,
+		sessionHeaderName: sessionHeaderName,
 	}
 }
 
@@ -51,7 +64,7 @@ func (p *Provider) Chat(
 	options map[string]any,
 ) (*protocoltypes.LLMResponse, error) {
 	if p.key == "" {
-		return nil, fmt.Errorf("OpenCode Go API key is required")
+		return nil, fmt.Errorf("API key is required")
 	}
 
 	endpoint, err := url.JoinPath(p.base, "responses")
@@ -96,7 +109,7 @@ func (p *Provider) Chat(
 			request.Header.Set(name, value)
 		}
 	}
-	common.ApplySessionHeader(request.Header, options, "x-opencode-session")
+	common.ApplySessionHeader(request.Header, options, p.sessionHeaderName)
 
 	response, err := p.client.Do(request)
 	if err != nil {

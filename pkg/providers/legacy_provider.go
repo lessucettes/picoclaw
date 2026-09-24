@@ -122,7 +122,7 @@ func modelConfigTemplateScore(modelCfg *config.ModelConfig, defaultProvider stri
 		return -1
 	}
 	score := 0
-	if strings.TrimSpace(modelCfg.APIKey()) != "" {
+	if modelCfg.HasAPIKey() {
 		score += 32
 	}
 	if strings.TrimSpace(modelCfg.APIBase) != "" {

@@ -373,11 +373,11 @@ A complete configuration using the native provider ID is:
 }
 ```
 
-A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. Set `api_base` to override `https://opencode.ai/zen/go/v1`. Environment-only entries should set `"enabled": true` explicitly.
+A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The environment value is resolved only when constructing the provider; it is not returned by model-management APIs or written to the config or `.security.yml`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. When `provider` is set, use a bare model ID from the catalog (IDs are exact and case-sensitive). Set `api_base` to override `https://opencode.ai/zen/go/v1`. Environment-only entries should set `"enabled": true` explicitly.
 
-OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch reads `/models`, but that catalog does not establish a model's protocol family.
+OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch reads `/models`, but that catalog does not establish a model's protocol family. Configure `proxy` to route requests through a proxy; it is honored by all three transports.
 
-PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Responses and Messages requests are currently non-streaming.
+PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Messages and Responses are currently non-streaming. Native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses also ignores generic `temperature` and `thinking_level` settings and accepts the standard `max_tokens` option as `max_output_tokens`.
 
 **Ollama (local)**
 

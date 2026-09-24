@@ -78,6 +78,21 @@ func NewProviderWithHeaders(apiKey, apiBase, userAgent string, timeoutSeconds in
 	return p
 }
 
+// NewProviderWithProxyAndHeaders creates a provider with optional proxy routing
+// and custom and session headers.
+func NewProviderWithProxyAndHeaders(
+	apiKey, apiBase, proxy, userAgent string,
+	timeoutSeconds int,
+	customHeaders map[string]string,
+	sessionHeaderName string,
+) *Provider {
+	p := NewProviderWithHeaders(apiKey, apiBase, userAgent, timeoutSeconds, customHeaders, sessionHeaderName)
+	if strings.TrimSpace(proxy) != "" {
+		p.httpClient.Transport = common.NewHTTPClient(strings.TrimSpace(proxy)).Transport
+	}
+	return p
+}
+
 // Chat sends messages to the Anthropic Messages API and returns the response.
 func (p *Provider) Chat(
 	ctx context.Context,
