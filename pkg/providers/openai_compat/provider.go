@@ -339,6 +339,10 @@ func (p *Provider) applyCustomHeaders(req *http.Request) {
 	}
 }
 
+func (p *Provider) GetDefaultModel() string {
+	return ""
+}
+
 func (p *Provider) SetProviderName(providerName string) {
 	p.providerName = strings.ToLower(strings.TrimSpace(providerName))
 }

@@ -16,6 +16,8 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers/azure"
 	"github.com/sipeed/picoclaw/pkg/providers/bedrock"
 	"github.com/sipeed/picoclaw/pkg/providers/common"
+	openai_compat "github.com/sipeed/picoclaw/pkg/providers/openai_compat"
+	openairesponses "github.com/sipeed/picoclaw/pkg/providers/openai_responses"
 )
 
 // createClaudeAuthProvider creates a Claude provider using OAuth credentials from auth store.
@@ -224,6 +226,30 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		)
 		provider.SetProviderName(protocol)
 		return finalizeProviderFromConfig(provider, modelID, cfg)
+
+	case "opencode-go":
+		if cfg.APIKey() == "" {
+			return nil, "", fmt.Errorf("api_key or OPENCODE_API_KEY is required for opencode-go")
+		}
+		family := openCodeGoEndpointFamily(modelID)
+		if family == "" {
+			return nil, "", fmt.Errorf("OpenCode Go model %q has no verified endpoint; check https://opencode.ai/docs/go/#endpoints", modelID)
+		}
+		base := ResolveAPIBase(cfg)
+		switch family {
+		case "responses":
+			return finalizeProviderFromConfig(openairesponses.NewProvider(cfg.APIKey(), base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders), modelID, cfg)
+		case "messages":
+			return finalizeProviderFromConfig(anthropicmessages.NewProviderWithHeaders(cfg.APIKey(), base, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session"), modelID, cfg)
+		default:
+			provider := openai_compat.NewProvider(cfg.APIKey(), base, cfg.Proxy,
+				openai_compat.WithProviderName(protocol), openai_compat.WithUserAgent(userAgent),
+				openai_compat.WithMaxTokensField(cfg.MaxTokensField),
+				openai_compat.WithRequestTimeout(time.Duration(cfg.RequestTimeout)*time.Second),
+				openai_compat.WithExtraBody(cfg.ExtraBody), openai_compat.WithCustomHeaders(cfg.CustomHeaders),
+				openai_compat.WithSessionHeaderName("x-opencode-session"))
+			return finalizeProviderFromConfig(provider, modelID, cfg)
+		}
 
 	case "gemini":
 		if cfg.APIKey() == "" && cfg.APIBase == "" {

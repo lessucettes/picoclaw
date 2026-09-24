@@ -97,3 +97,10 @@ func TestOpenCodeSessionChatHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderGetDefaultModelReturnsEmpty(t *testing.T) {
+	provider := NewProvider("test-key", "http://127.0.0.1", "")
+	if got := provider.GetDefaultModel(); got != "" {
+		t.Fatalf("GetDefaultModel() = %q, want empty model", got)
+	}
+}
