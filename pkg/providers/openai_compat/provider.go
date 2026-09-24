@@ -34,14 +34,15 @@ type (
 )
 
 type Provider struct {
-	apiKey         string
-	apiBase        string
-	providerName   string
-	maxTokensField string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
-	httpClient     *http.Client
-	extraBody      map[string]any // Additional fields to inject into request body
-	customHeaders  map[string]string
-	userAgent      string
+	apiKey            string
+	apiBase           string
+	providerName      string
+	maxTokensField    string // Field name for max tokens (e.g., "max_completion_tokens" for o1/glm models)
+	httpClient        *http.Client
+	extraBody         map[string]any // Additional fields to inject into request body
+	customHeaders     map[string]string
+	sessionHeaderName string
+	userAgent         string
 }
 
 type Option func(*Provider)
@@ -100,6 +101,12 @@ func WithExtraBody(extraBody map[string]any) Option {
 func WithCustomHeaders(customHeaders map[string]string) Option {
 	return func(p *Provider) {
 		p.customHeaders = customHeaders
+	}
+}
+
+func WithSessionHeaderName(name string) Option {
+	return func(p *Provider) {
+		p.sessionHeaderName = name
 	}
 }
 
@@ -488,6 +495,7 @@ func (p *Provider) Chat(
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 	p.applyCustomHeaders(req)
+	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -560,6 +568,7 @@ func (p *Provider) ChatStreamEvents(
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 	p.applyCustomHeaders(req)
+	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
 
 	// Use a client without Timeout for streaming — the http.Client.Timeout covers
 	// the entire request lifecycle including body reads, which would kill long streams.

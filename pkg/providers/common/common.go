@@ -64,6 +64,17 @@ func NewHTTPClient(proxy string) *http.Client {
 	return client
 }
 
+// ApplySessionHeader sets a provider-specific session header from request options.
+// An explicitly configured header takes precedence over the session option.
+func ApplySessionHeader(header http.Header, options map[string]any, name string) {
+	if header == nil || name == "" || header.Get(name) != "" {
+		return
+	}
+	if key, ok := options["session_key"].(string); ok && strings.TrimSpace(key) != "" {
+		header.Set(name, strings.TrimSpace(key))
+	}
+}
+
 // --- Message serialization ---
 
 // openaiMessage is the wire-format message for OpenAI-compatible APIs.
