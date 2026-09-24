@@ -39,10 +39,12 @@ const (
 // Provider implements Anthropic Messages API via HTTP (without SDK).
 // It supports custom endpoints that use Anthropic's native message format.
 type Provider struct {
-	apiKey     string
-	apiBase    string
-	httpClient *http.Client
-	userAgent  string
+	apiKey            string
+	apiBase           string
+	httpClient        *http.Client
+	userAgent         string
+	customHeaders     map[string]string
+	sessionHeaderName string
 }
 
 // NewProvider creates a new Anthropic Messages API provider.
@@ -66,6 +68,14 @@ func NewProviderWithTimeout(apiKey, apiBase, userAgent string, timeoutSeconds in
 			Timeout: timeout,
 		},
 	}
+}
+
+// NewProviderWithHeaders creates a provider with custom and session headers.
+func NewProviderWithHeaders(apiKey, apiBase, userAgent string, timeoutSeconds int, customHeaders map[string]string, sessionHeaderName string) *Provider {
+	p := NewProviderWithTimeout(apiKey, apiBase, userAgent, timeoutSeconds)
+	p.customHeaders = customHeaders
+	p.sessionHeaderName = sessionHeaderName
+	return p
 }
 
 // Chat sends messages to the Anthropic Messages API and returns the response.
@@ -111,6 +121,12 @@ func (p *Provider) Chat(
 	if p.userAgent != "" {
 		req.Header.Set("User-Agent", p.userAgent)
 	}
+	for name, value := range p.customHeaders {
+		if strings.TrimSpace(name) != "" {
+			req.Header.Set(name, value)
+		}
+	}
+	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
 
 	// Execute request
 	resp, err := p.httpClient.Do(req)
