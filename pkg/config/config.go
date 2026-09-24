@@ -827,6 +827,9 @@ func (c *ModelConfig) APIKey() string {
 	if len(c.APIKeys) > 0 {
 		return c.APIKeys[0].String()
 	}
+	if c.Provider == "opencode-go" || (c.Provider == "" && strings.HasPrefix(c.Model, "opencode-go/")) {
+		return strings.TrimSpace(os.Getenv("OPENCODE_API_KEY"))
+	}
 	return ""
 }
 
