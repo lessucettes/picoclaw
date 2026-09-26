@@ -194,7 +194,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		AllowInterimPicoPublish: true,
 	}
 	var err error
-	opts, err = resolveTurnProfileOptions(al.GetConfig(), opts)
+	opts, err = resolveTurnProfileOptions(al.GetConfig(), agent, opts)
 	if err != nil {
 		return "", err
 	}

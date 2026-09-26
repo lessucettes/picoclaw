@@ -40,6 +40,22 @@ func (al *AgentLoop) publishResponseOrError(
 }
 
 func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatID, sessionKey, response string) {
+	al.publishResponseIfNeeded(ctx, channel, chatID, sessionKey, response, nil)
+}
+
+func (al *AgentLoop) publishResponseForInboundIfNeeded(
+	ctx context.Context,
+	channel, chatID, sessionKey, response string,
+	inbound *bus.InboundContext,
+) {
+	al.publishResponseIfNeeded(ctx, channel, chatID, sessionKey, response, inbound)
+}
+
+func (al *AgentLoop) publishResponseIfNeeded(
+	ctx context.Context,
+	channel, chatID, sessionKey, response string,
+	inbound *bus.InboundContext,
+) {
 	if response == "" {
 		return
 	}
@@ -73,8 +89,12 @@ func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatI
 		return
 	}
 
+	outboundCtx := bus.NewOutboundContext(channel, chatID, "")
+	if inbound != nil {
+		outboundCtx = outboundContextFromInbound(inbound, channel, chatID, "")
+	}
 	msg := bus.OutboundMessage{
-		Context:    bus.NewOutboundContext(channel, chatID, ""),
+		Context:    outboundCtx,
 		SessionKey: sessionKey,
 		Content:    response,
 	}

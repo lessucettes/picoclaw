@@ -34,9 +34,7 @@ func promptBuildRequestForTurn(
 			turnProfileNativeSearchCallable(cfg, ts.profile, ts.agent)
 	}
 	if turnProfileSystemPromptOff(ts.profile) {
-		req.SuppressDefaultSystemPrompt = true
-		req.SuppressSkillContext = true
-		req.ToolUseFallback = hasCallableTools
+		req.MinimalSystemPrompt = true
 	}
 	if ts.profile.Enabled && !hasCallableTools {
 		req.SuppressToolUseRule = true
@@ -97,9 +95,7 @@ func promptBuildRequestForProcessOptions(
 		hasCallableTools = turnProfileHasCallableTools(profile, agent.Tools.ToProviderDefs())
 	}
 	if turnProfileSystemPromptOff(profile) {
-		req.SuppressDefaultSystemPrompt = true
-		req.SuppressSkillContext = true
-		req.ToolUseFallback = hasCallableTools
+		req.MinimalSystemPrompt = true
 	}
 	if profile.Enabled && !hasCallableTools {
 		req.SuppressToolUseRule = true

@@ -118,6 +118,7 @@ type PromptBuildRequest struct {
 	ActiveSkills []string
 	Overlays     []PromptPart
 
+	MinimalSystemPrompt         bool
 	SuppressDefaultSystemPrompt bool
 	SuppressSkillContext        bool
 	SuppressToolUseRule         bool

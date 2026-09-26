@@ -21,6 +21,22 @@ type TurnProfileConfig struct {
 	Tools        TurnProfileBlock `json:"tools,omitempty"`
 }
 
+// TurnProfileOverride contains only fields explicitly supplied for one agent.
+// Pointers preserve omitted fields so they inherit the global defaults.
+type TurnProfileOverride struct {
+	Enabled      *bool                     `json:"enabled,omitempty"`
+	History      *TurnProfileBlockOverride `json:"history,omitempty"`
+	SystemPrompt *TurnProfileBlockOverride `json:"system_prompt,omitempty"`
+	Skills       *TurnProfileBlockOverride `json:"skills,omitempty"`
+	Tools        *TurnProfileBlockOverride `json:"tools,omitempty"`
+}
+
+// TurnProfileBlockOverride is a partial override of a single profile block.
+type TurnProfileBlockOverride struct {
+	Mode  *TurnProfileMode `json:"mode,omitempty"`
+	Allow *[]string        `json:"allow,omitempty"`
+}
+
 type TurnProfileBlock struct {
 	Mode  TurnProfileMode `json:"mode,omitempty"`
 	Allow []string        `json:"allow,omitempty"`
@@ -53,7 +69,21 @@ func (d *AgentDefaults) ResolveTurnProfile() (EffectiveTurnProfile, bool, error)
 	if d == nil {
 		return EffectiveTurnProfile{}, false, nil
 	}
-	profile := d.TurnProfile
+	return resolveTurnProfile(d.TurnProfile)
+}
+
+func (d *AgentDefaults) ResolveTurnProfileForAgent(agent *AgentConfig) (EffectiveTurnProfile, bool, error) {
+	var profile TurnProfileConfig
+	if d != nil {
+		profile = d.TurnProfile
+	}
+	if agent != nil {
+		profile = mergeTurnProfileConfig(profile, agent.TurnProfile)
+	}
+	return resolveTurnProfile(profile)
+}
+
+func resolveTurnProfile(profile TurnProfileConfig) (EffectiveTurnProfile, bool, error) {
 	if !profile.Enabled {
 		return EffectiveTurnProfile{}, false, nil
 	}
@@ -75,7 +105,44 @@ func (c *Config) ValidateTurnProfile() error {
 	if c == nil {
 		return nil
 	}
-	return validateTurnProfile(c.Agents.Defaults.TurnProfile)
+	if err := validateTurnProfile(c.Agents.Defaults.TurnProfile); err != nil {
+		return err
+	}
+	for i := range c.Agents.List {
+		agent := &c.Agents.List[i]
+		profile := mergeTurnProfileConfig(c.Agents.Defaults.TurnProfile, agent.TurnProfile)
+		if err := validateTurnProfile(profile); err != nil {
+			return fmt.Errorf("agents.list[%d] (%q).turn_profile: %w", i, agent.ID, err)
+		}
+	}
+	return nil
+}
+
+func mergeTurnProfileConfig(defaults TurnProfileConfig, override *TurnProfileOverride) TurnProfileConfig {
+	if override == nil {
+		return defaults
+	}
+	merged := defaults
+	if override.Enabled != nil {
+		merged.Enabled = *override.Enabled
+	}
+	mergeTurnProfileBlock(&merged.History, override.History)
+	mergeTurnProfileBlock(&merged.SystemPrompt, override.SystemPrompt)
+	mergeTurnProfileBlock(&merged.Skills, override.Skills)
+	mergeTurnProfileBlock(&merged.Tools, override.Tools)
+	return merged
+}
+
+func mergeTurnProfileBlock(defaults *TurnProfileBlock, override *TurnProfileBlockOverride) {
+	if override == nil {
+		return
+	}
+	if override.Mode != nil {
+		defaults.Mode = *override.Mode
+	}
+	if override.Allow != nil {
+		defaults.Allow = append([]string(nil), (*override.Allow)...)
+	}
 }
 
 func validateTurnProfile(profile TurnProfileConfig) error {

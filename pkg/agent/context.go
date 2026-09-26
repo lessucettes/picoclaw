@@ -387,6 +387,9 @@ func (cb *ContextBuilder) BuildSystemPromptWithCache() string {
 func (cb *ContextBuilder) buildSystemPromptForRequest(
 	req PromptBuildRequest,
 ) (string, []providers.ContentBlock) {
+	if req.MinimalSystemPrompt {
+		return cb.buildMinimalSystemPrompt(req.Channel, req.ChatID, req.SenderID, req.SenderDisplayName)
+	}
 	if req.SuppressDefaultSystemPrompt {
 		return "", nil
 	}
@@ -423,6 +426,70 @@ func (cb *ContextBuilder) buildSystemPromptForRequest(
 		blocks = append(blocks, promptContentBlock(part, cacheControlForPromptPart(part)))
 	}
 	return staticPrompt, blocks
+}
+
+func (cb *ContextBuilder) buildMinimalSystemPrompt(
+	channel, chatID, senderID, senderDisplayName string,
+) (string, []providers.ContentBlock) {
+	parts := make([]PromptPart, 0, 4)
+	definition := cb.LoadAgentDefinition()
+	if definition.Source == AgentDefinitionSourceAgent && definition.Agent != nil {
+		if body := strings.TrimSpace(definition.Agent.Body); body != "" {
+			parts = append(parts, PromptPart{
+				ID:      "instruction.agent_body",
+				Layer:   PromptLayerInstruction,
+				Slot:    PromptSlotWorkspace,
+				Source:  PromptSource{ID: PromptSourceWorkspace, Name: "AGENT.md"},
+				Title:   "agent body",
+				Content: body,
+				Stable:  true,
+				Cache:   PromptCacheEphemeral,
+			})
+		}
+	}
+
+	parts = append(parts, PromptPart{
+		ID:      "context.current_time",
+		Layer:   PromptLayerContext,
+		Slot:    PromptSlotRuntime,
+		Source:  PromptSource{ID: PromptSourceRuntime, Name: "current_time"},
+		Title:   "current time",
+		Content: "## Current Time\n" + formatCurrentTime(),
+		Stable:  false,
+		Cache:   PromptCacheNone,
+	})
+	if channel != "" && chatID != "" {
+		parts = append(parts, PromptPart{
+			ID:      "context.current_session",
+			Layer:   PromptLayerContext,
+			Slot:    PromptSlotRuntime,
+			Source:  PromptSource{ID: PromptSourceRuntime, Name: "current_session"},
+			Title:   "current session",
+			Content: fmt.Sprintf("## Current Session\nChannel: %s\nChat ID: %s", channel, chatID),
+			Stable:  false,
+			Cache:   PromptCacheNone,
+		})
+	}
+	if senderLine := formatCurrentSenderLine(senderID, senderDisplayName); senderLine != "" {
+		parts = append(parts, PromptPart{
+			ID:      "context.current_sender",
+			Layer:   PromptLayerContext,
+			Slot:    PromptSlotRuntime,
+			Source:  PromptSource{ID: PromptSourceRuntime, Name: "current_sender"},
+			Title:   "current sender",
+			Content: "## Current Sender\n" + senderLine,
+			Stable:  false,
+			Cache:   PromptCacheNone,
+		})
+	}
+
+	contents := make([]string, 0, len(parts))
+	blocks := make([]providers.ContentBlock, 0, len(parts))
+	for _, part := range parts {
+		contents = append(contents, part.Content)
+		blocks = append(blocks, promptContentBlock(part, nil))
+	}
+	return strings.Join(contents, "\n\n"), blocks
 }
 
 func (cb *ContextBuilder) buildSkillsSummary(allowed []string) string {
@@ -799,14 +866,17 @@ func formatCurrentSenderLine(senderID, senderDisplayName string) string {
 	}
 }
 
+func formatCurrentTime() string {
+	return time.Now().Format("2006-01-02 15:04 (Monday)")
+}
+
 func (cb *ContextBuilder) buildDynamicContext(
 	channel, chatID, senderID, senderDisplayName string,
 ) string {
-	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Current Time\n%s\n\n## Runtime\n%s", now, rt)
+	fmt.Fprintf(&sb, "## Current Time\n%s\n\n## Runtime\n%s", formatCurrentTime(), rt)
 
 	if channel != "" && chatID != "" {
 		fmt.Fprintf(&sb, "\n\n## Current Session\nChannel: %s\nChat ID: %s", channel, chatID)
@@ -841,6 +911,12 @@ func (cb *ContextBuilder) BuildMessages(
 
 func (cb *ContextBuilder) BuildMessagesFromPrompt(req PromptBuildRequest) []providers.Message {
 	messages := []providers.Message{}
+	if req.MinimalSystemPrompt {
+		req.SuppressDefaultSystemPrompt = true
+		req.SuppressSkillContext = true
+		req.ToolUseFallback = false
+		req.Overlays = nil
+	}
 
 	// The default static part (identity, bootstrap, skills, memory) is cached
 	// locally to avoid repeated file I/O and string building on every call

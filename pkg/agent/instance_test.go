@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,84 @@ func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {
 	}
 	if agent.Temperature != 1.0 {
 		t.Fatalf("Temperature = %f, want %f", agent.Temperature, 1.0)
+	}
+}
+
+func TestNewAgentInstance_ResolvesPerAgentTokenBudgets(t *testing.T) {
+	cfg := config.DefaultConfig()
+	workspace := t.TempDir()
+	cfg.Agents.Defaults.Workspace = workspace
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 128
+	cfg.Agents.Defaults.ContextWindow = 2048
+
+	var agents []config.AgentConfig
+	const raw = `[
+		{"id":"agent-a","max_tokens":96,"context_window":1024},
+		{"id":"agent-b","max_tokens":512,"context_window":8192},
+		{"id":"default-agent"},
+		{"id":"max-only-agent","max_tokens":256},
+		{"id":"context-only-agent","context_window":4096}
+	]`
+	if err := json.Unmarshal([]byte(raw), &agents); err != nil {
+		t.Fatalf("unmarshal agents: %v", err)
+	}
+
+	tests := []struct {
+		id            string
+		maxTokens     int
+		contextWindow int
+	}{
+		{id: "agent-a", maxTokens: 96, contextWindow: 1024},
+		{id: "agent-b", maxTokens: 512, contextWindow: 8192},
+		{id: "default-agent", maxTokens: 128, contextWindow: 2048},
+		{id: "max-only-agent", maxTokens: 256, contextWindow: 2048},
+		{id: "context-only-agent", maxTokens: 128, contextWindow: 4096},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			var agentCfg *config.AgentConfig
+			for i := range agents {
+				if agents[i].ID == tt.id {
+					agentCfg = &agents[i]
+					break
+				}
+			}
+			if agentCfg == nil {
+				t.Fatalf("agent config %q not found", tt.id)
+			}
+			agentCfg.Workspace = filepath.Join(workspace, tt.id)
+			agent := NewAgentInstance(agentCfg, &cfg.Agents.Defaults, cfg, &mockProvider{})
+			if agent.MaxTokens != tt.maxTokens {
+				t.Errorf("MaxTokens = %d, want %d", agent.MaxTokens, tt.maxTokens)
+			}
+			if agent.ContextWindow != tt.contextWindow {
+				t.Errorf("ContextWindow = %d, want %d", agent.ContextWindow, tt.contextWindow)
+			}
+		})
+	}
+}
+
+func TestNewAgentInstance_UsesEffectiveMaxTokensForContextWindowFallback(t *testing.T) {
+	cfg := config.DefaultConfig()
+	workspace := t.TempDir()
+	cfg.Agents.Defaults.Workspace = workspace
+	cfg.Agents.Defaults.ModelName = "test-model"
+	cfg.Agents.Defaults.MaxTokens = 128
+	cfg.Agents.Defaults.ContextWindow = 0
+
+	var agentCfg config.AgentConfig
+	if err := json.Unmarshal([]byte(`{"id":"custom-agent","max_tokens":512}`), &agentCfg); err != nil {
+		t.Fatalf("unmarshal agent config: %v", err)
+	}
+	agentCfg.Workspace = filepath.Join(workspace, agentCfg.ID)
+	agent := NewAgentInstance(&agentCfg, &cfg.Agents.Defaults, cfg, &mockProvider{})
+
+	if agent.MaxTokens != 512 {
+		t.Fatalf("MaxTokens = %d, want per-agent override 512", agent.MaxTokens)
+	}
+	if agent.ContextWindow != 2048 {
+		t.Fatalf("ContextWindow = %d, want effective max_tokens * 4 (2048)", agent.ContextWindow)
 	}
 }
 

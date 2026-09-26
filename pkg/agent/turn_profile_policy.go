@@ -7,19 +7,32 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-func resolveTurnProfileOptions(cfg *config.Config, opts processOptions) (processOptions, error) {
-	if cfg == nil {
-		return opts, nil
+func resolveTurnProfileOptions(
+	cfg *config.Config,
+	agent *AgentInstance,
+	opts processOptions,
+) (processOptions, error) {
+	var profile config.EffectiveTurnProfile
+	var configured bool
+	if agent != nil && agent.turnProfileConfigured {
+		if agent.turnProfileErr != nil {
+			return opts, agent.turnProfileErr
+		}
+		profile = agent.turnProfile
+		configured = true
+	} else if cfg != nil {
+		resolved, ok, err := cfg.Agents.Defaults.ResolveTurnProfile()
+		if err != nil {
+			return opts, err
+		}
+		profile = resolved
+		configured = ok
 	}
-	profile, ok, err := cfg.Agents.Defaults.ResolveTurnProfile()
-	if err != nil {
-		return opts, err
-	}
-	if !ok {
+	if !configured {
 		return opts, nil
 	}
 	opts.TurnProfile = profile
-	if profile.HistoryMode == config.TurnProfileModeOff {
+	if profile.Enabled && profile.HistoryMode == config.TurnProfileModeOff {
 		opts.NoHistory = true
 		opts.EnableSummary = false
 	}

@@ -382,7 +382,7 @@ func (al *AgentLoop) askSideQuestion(
 
 	if opts != nil {
 		normalizeProcessOptionsInPlace(opts)
-		resolved, err := resolveTurnProfileOptions(al.GetConfig(), *opts)
+		resolved, err := resolveTurnProfileOptions(al.GetConfig(), agent, *opts)
 		if err != nil {
 			return "", err
 		}

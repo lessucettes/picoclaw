@@ -14,12 +14,31 @@
       "split_on_marker": false,
       "max_llm_retries": 2,
       "llm_retry_backoff_secs": 2,
+      "turn_profile": {
+        "enabled": true,
+        "history": { "mode": "off" },
+        "skills": { "mode": "default" },
+        "system_prompt": { "mode": "default" }
+      },
       "tool_feedback": {
         "enabled": false,
         "max_args_length": 300,
         "separate_messages": false
       }
-    }
+    },
+    "list": [
+      {
+        "id": "agent-a",
+        "default": true,
+        "max_tokens": 96,
+        "context_window": 1024,
+        "turn_profile": {
+          "history": { "mode": "default" }
+        }
+      },
+      { "id": "agent-b", "max_tokens": 512, "context_window": 8192 },
+      { "id": "default-agent" }
+    ]
   },
   "evolution": {
     "enabled": false,

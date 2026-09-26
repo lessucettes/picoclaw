@@ -532,7 +532,7 @@ func (al *AgentLoop) runAgentLoop(
 ) (string, error) {
 	opts = normalizeProcessOptions(opts)
 	var err error
-	opts, err = resolveTurnProfileOptions(al.GetConfig(), opts)
+	opts, err = resolveTurnProfileOptions(al.GetConfig(), agent, opts)
 	if err != nil {
 		return "", err
 	}

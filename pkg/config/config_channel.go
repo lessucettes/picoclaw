@@ -38,12 +38,25 @@ const (
 	ChannelWhatsAppNative = "whatsapp_native"
 	ChannelTeamsWebHook   = "teams_webhook"
 	ChannelMQTT           = "mqtt"
+	ChannelMeshtastic     = "meshtastic"
 	ChannelSlackWebHook   = "slack_webhook"
 )
 
 func initChannel() {
 	registerSingletonChannel(ChannelPico)
 	registerSingletonChannel(ChannelPicoClient)
+}
+
+// MeshtasticSettings configures a direct Serial or HTTP Phone API connection.
+type MeshtasticSettings struct {
+	Transport      string `json:"transport"                 yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_TRANSPORT"`
+	SerialPort     string `json:"serial_port,omitempty"     yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_SERIAL_PORT"`
+	HTTPAddress    string `json:"http_address,omitempty"    yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_HTTP_ADDRESS"`
+	ChannelIndices []int  `json:"channel_indices,omitempty" yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_CHANNEL_INDICES"`
+	TextChunkBytes *int   `json:"text_chunk_bytes,omitempty" yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_TEXT_CHUNK_BYTES"`
+	SendDelayMS    *int   `json:"send_delay_ms,omitempty"    yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_SEND_DELAY_MS"`
+	// Commands is a pointer so omitted (allow all) remains distinct from [] (block all).
+	Commands *[]string `json:"commands,omitempty"        yaml:"-"`
 }
 
 // singletonRegistry stores which channel types are singletons (only allow one instance).
@@ -681,6 +694,7 @@ var channelSettingsFactory = map[string]any{
 	ChannelWhatsAppNative: (WhatsAppSettings{}),
 	ChannelTeamsWebHook:   (TeamsWebhookSettings{}),
 	ChannelMQTT:           (MQTTSettings{}),
+	ChannelMeshtastic:     (MeshtasticSettings{}),
 	ChannelSlackWebHook:   (SlackWebhookSettings{}),
 }
 

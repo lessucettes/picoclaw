@@ -101,7 +101,7 @@ Use `observe` first if you want to inspect learning records without generating s
 
 ### Request Context Policy
 
-`turn_profile` is an optional request context policy under `agents.defaults.turn_profile`. Leave it unset or set `"enabled": false` to keep PicoClaw's normal behavior. When `"enabled": true`, the same policy applies to every new turn.
+`turn_profile` is an optional request context policy under `agents.defaults.turn_profile`. Individual entries in `agents.list` can provide a partial `turn_profile` override. The per-agent value is merged field-by-field with the defaults: omitted fields inherit, while explicitly configured fields override only their matching setting. Leave the global policy unset or set `"enabled": false` to keep PicoClaw's normal behavior. When enabled, the effective policy applies to each new turn for that agent.
 
 Each block uses the same `mode` values:
 
@@ -142,6 +142,59 @@ Example clean web policy:
   }
 }
 ```
+
+#### Per-Agent History Modes
+
+Use a per-agent `history.mode` override to restore history for one agent while keeping it disabled by default for others. `enabled` is inherited like the other fields: set it in defaults to activate the policy globally, or set it in an agent override to activate or disable the policy for that agent. Omitted per-agent fields inherit their default values.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "turn_profile": {
+        "enabled": true,
+        "history": { "mode": "off" },
+        "skills": { "mode": "default" },
+        "system_prompt": { "mode": "default" }
+      }
+    },
+    "list": [
+      {
+        "id": "agent-a",
+        "default": true,
+        "turn_profile": {
+          "history": { "mode": "default" }
+        }
+      },
+      { "id": "agent-b" }
+    ]
+  }
+}
+```
+
+Here `agent-a` reads and writes normal session history. `agent-b` omits an override and inherits `history.mode: "off"`, as well as the defaults for the other profile blocks.
+
+#### Per-Agent Runtime Budgets
+
+`agents.defaults.max_tokens` and `agents.defaults.context_window` remain the global defaults. Each `agents.list[]` entry can override either value independently; omitted fields inherit the corresponding default.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "max_tokens": 128,
+      "context_window": 2048
+    },
+    "list": [
+      { "id": "agent-a", "max_tokens": 96, "context_window": 1024 },
+      { "id": "agent-b", "max_tokens": 512, "context_window": 8192 },
+      { "id": "default-agent" }
+    ]
+  }
+}
+```
+
+When the effective `context_window` is `0`, PicoClaw uses the existing `max_tokens * 4` heuristic with that agent's effective `max_tokens`. For example, if `agents.defaults.context_window` is `0`, an agent overriding `max_tokens` to `512` and omitting `context_window` gets a context window of `2048`.
 
 ### Web launcher dashboard
 

@@ -41,6 +41,9 @@ type AgentInstance struct {
 	Sessions                  session.SessionStore
 	ContextBuilder            *ContextBuilder
 	Tools                     *tools.ToolRegistry
+	turnProfile               config.EffectiveTurnProfile
+	turnProfileConfigured     bool
+	turnProfileErr            error
 	Definition                AgentContextDefinition
 	Subagents                 *config.SubagentsConfig
 	SkillsFilter              []string
@@ -189,17 +192,32 @@ func NewAgentInstance(
 	}
 	warnOnUnknownAgentMCPServerDeclarations(agentID, workspace, cfg, definition)
 
+	turnProfile, _, turnProfileErr := defaults.ResolveTurnProfileForAgent(agentCfg)
+	if turnProfileErr != nil {
+		logger.ErrorCF("agent", "Failed to resolve turn profile", map[string]any{
+			"agent_id": agentID,
+			"error":    turnProfileErr.Error(),
+		})
+	}
+	turnProfileConfigured := defaults.TurnProfile.Enabled || (agentCfg != nil && agentCfg.TurnProfile != nil)
+
 	maxIter := defaults.MaxToolIterations
 	if maxIter == 0 {
 		maxIter = 20
 	}
 
 	maxTokens := defaults.MaxTokens
+	if agentCfg != nil && agentCfg.MaxTokens != nil {
+		maxTokens = *agentCfg.MaxTokens
+	}
 	if maxTokens == 0 {
 		maxTokens = 8192
 	}
 
 	contextWindow := defaults.ContextWindow
+	if agentCfg != nil && agentCfg.ContextWindow != nil {
+		contextWindow = *agentCfg.ContextWindow
+	}
 	if contextWindow == 0 {
 		// Default heuristic: 4x the output token limit.
 		// Most models have context windows well above their output limits
@@ -339,6 +357,9 @@ func NewAgentInstance(
 		Sessions:                  sessions,
 		ContextBuilder:            contextBuilder,
 		Tools:                     toolsRegistry,
+		turnProfile:               turnProfile,
+		turnProfileConfigured:     turnProfileConfigured,
+		turnProfileErr:            turnProfileErr,
 		Definition:                definition,
 		Subagents:                 subagents,
 		SkillsFilter:              skillsFilter,

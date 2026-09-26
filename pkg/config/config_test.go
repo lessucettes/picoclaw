@@ -160,6 +160,134 @@ func TestAgentConfig_FullParse(t *testing.T) {
 	}
 }
 
+func TestAgentConfig_TurnProfileOverrideParsesAndMergesDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	const raw = `{
+		"agents": {
+			"defaults": {
+				"turn_profile": {
+					"enabled": true,
+					"history": {"mode": "off"},
+					"system_prompt": {"mode": "off"},
+					"skills": {"mode": "default"},
+					"tools": {"mode": "custom", "allow": ["web_search", "web_fetch"]}
+				}
+			},
+			"list": [
+				{"id": "main", "turn_profile": {"history": {"mode": "default"}}},
+				{"id": "weather"}
+			]
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(cfg.Agents.List) != 2 {
+		t.Fatalf("agents.list len = %d, want 2", len(cfg.Agents.List))
+	}
+	if err := cfg.ValidateTurnProfile(); err != nil {
+		t.Fatalf("ValidateTurnProfile() error = %v", err)
+	}
+	encoded, err := json.Marshal(cfg.Agents.List[0])
+	if err != nil {
+		t.Fatalf("marshal main agent: %v", err)
+	}
+	var agentFields map[string]json.RawMessage
+	if err = json.Unmarshal(encoded, &agentFields); err != nil {
+		t.Fatalf("unmarshal serialized main agent: %v", err)
+	}
+	if _, ok := agentFields["turn_profile"]; !ok {
+		t.Fatalf("serialized main agent omitted turn_profile: %s", encoded)
+	}
+	if len(cfg.Agents.List[1].ID) == 0 {
+		t.Fatal("legacy agent entry without turn_profile did not parse")
+	}
+
+	mainProfile, ok, err := cfg.Agents.Defaults.ResolveTurnProfileForAgent(&cfg.Agents.List[0])
+	if err != nil {
+		t.Fatalf("ResolveTurnProfileForAgent(main) error = %v", err)
+	}
+	if !ok || mainProfile.HistoryMode != TurnProfileModeDefault ||
+		mainProfile.SystemPromptMode != TurnProfileModeOff ||
+		mainProfile.SkillsMode != TurnProfileModeDefault ||
+		mainProfile.ToolsMode != TurnProfileModeCustom {
+		t.Fatalf("main effective profile = %+v, want history default and inherited other fields", mainProfile)
+	}
+	assert.Equal(t, []string{"web_search", "web_fetch"}, mainProfile.AllowedTools)
+
+	weatherProfile, ok, err := cfg.Agents.Defaults.ResolveTurnProfileForAgent(&cfg.Agents.List[1])
+	if err != nil {
+		t.Fatalf("ResolveTurnProfileForAgent(weather) error = %v", err)
+	}
+	if !ok || weatherProfile.HistoryMode != TurnProfileModeOff ||
+		weatherProfile.SystemPromptMode != TurnProfileModeOff ||
+		weatherProfile.SkillsMode != TurnProfileModeDefault {
+		t.Fatalf("weather effective profile = %+v, want inherited defaults", weatherProfile)
+	}
+	if cfg.Agents.Defaults.TurnProfile.History.Mode != TurnProfileModeOff {
+		t.Fatalf("resolving agent profile mutated global defaults: %+v", cfg.Agents.Defaults.TurnProfile)
+	}
+}
+
+func TestAgentConfig_PerAgentTokenBudgetsParseAndRoundTrip(t *testing.T) {
+	cfg := DefaultConfig()
+	const raw = `{
+		"agents": {
+			"defaults": {"max_tokens": 128, "context_window": 2048},
+			"list": [
+				{"id": "agent-a", "max_tokens": 96, "context_window": 1024},
+				{"id": "agent-b", "max_tokens": 0, "context_window": 0},
+				{"id": "default-agent"}
+			]
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg.Agents.Defaults.MaxTokens != 128 || cfg.Agents.Defaults.ContextWindow != 2048 {
+		t.Fatalf("global defaults changed while parsing agent overrides: %+v", cfg.Agents.Defaults)
+	}
+
+	decodeFields := func(index int) map[string]json.RawMessage {
+		t.Helper()
+		encoded, err := json.Marshal(cfg.Agents.List[index])
+		if err != nil {
+			t.Fatalf("marshal agent %d: %v", index, err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatalf("unmarshal serialized agent %d: %v", index, err)
+		}
+		return fields
+	}
+	assertIntField := func(fields map[string]json.RawMessage, name string, want int) {
+		t.Helper()
+		var got int
+		if err := json.Unmarshal(fields[name], &got); err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		if got != want {
+			t.Fatalf("%s = %d, want %d", name, got, want)
+		}
+	}
+
+	agentA := decodeFields(0)
+	assertIntField(agentA, "max_tokens", 96)
+	assertIntField(agentA, "context_window", 1024)
+
+	agentB := decodeFields(1)
+	assertIntField(agentB, "max_tokens", 0)
+	assertIntField(agentB, "context_window", 0)
+
+	defaultAgent := decodeFields(2)
+	if _, ok := defaultAgent["max_tokens"]; ok {
+		t.Fatalf("omitted max_tokens serialized as explicit override: %s", defaultAgent["max_tokens"])
+	}
+	if _, ok := defaultAgent["context_window"]; ok {
+		t.Fatalf("omitted context_window serialized as explicit override: %s", defaultAgent["context_window"])
+	}
+}
+
 func TestTurnProfileConfig_ParseAndResolve(t *testing.T) {
 	jsonData := `{
 		"agents": {
@@ -264,6 +392,12 @@ func TestTurnProfileConfig_ValidationRejectsUnsupportedModes(t *testing.T) {
 			name: "unknown mode",
 			raw:  `{"agents":{"defaults":{"turn_profile":{"enabled":true,"tools":{"mode":"sometimes"}}}}}`,
 			want: "unsupported mode",
+		},
+		{
+			name: "per-agent invalid mode",
+			raw: `{"agents":{"defaults":{"turn_profile":{"enabled":true}},"list":[{"id":"main",` +
+				`"turn_profile":{"history":{"mode":"custom"}}}]}}`,
+			want: "history.mode",
 		},
 	}
 

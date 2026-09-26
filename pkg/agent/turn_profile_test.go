@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -85,6 +86,86 @@ func writeTurnProfileSkill(t *testing.T, workspace, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write skill: %v", err)
+	}
+}
+
+func TestTurnProfile_PerAgentHistoryModes(t *testing.T) {
+	cfg := config.DefaultConfig()
+	const raw = `{
+		"agents": {
+			"defaults": {
+				"turn_profile": {
+					"enabled": true,
+					"history": {"mode": "off"},
+					"skills": {"mode": "default"},
+					"system_prompt": {"mode": "default"}
+				}
+			},
+			"list": [
+				{
+					"id": "main",
+					"default": true,
+					"turn_profile": {
+						"history": {"mode": "default"}
+					}
+				},
+				{"id": "weather"}
+			]
+		}
+	}`
+	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if len(cfg.Agents.List) != 2 {
+		t.Fatalf("agents.list len = %d, want 2", len(cfg.Agents.List))
+	}
+	for i := range cfg.Agents.List {
+		cfg.Agents.List[i].Workspace = t.TempDir()
+	}
+	provider := &turnProfileCaptureProvider{}
+	al := newTurnProfileAgentLoop(t, cfg, provider)
+
+	testTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	main, ok := al.GetRegistry().GetAgent("main")
+	if !ok {
+		t.Fatal("main agent was not registered")
+	}
+	mainSession := "agent:main:test-per-agent-profile"
+	mainHistory := []providers.Message{{Role: "user", Content: "MAIN_HISTORY", CreatedAt: &testTime}}
+	main.Sessions.SetHistory(mainSession, mainHistory)
+	if _, err := al.runAgentLoop(context.Background(), main, processOptions{
+		SessionKey:      mainSession,
+		UserMessage:     "main current",
+		DefaultResponse: defaultResponse,
+	}); err != nil {
+		t.Fatalf("runAgentLoop(main) error = %v", err)
+	}
+	if len(provider.messages) != 3 || provider.messages[1].Content != "MAIN_HISTORY" {
+		t.Fatalf("main messages = %#v, want prior history included", provider.messages)
+	}
+	if got := main.Sessions.GetHistory(mainSession); len(got) != len(mainHistory)+2 {
+		t.Fatalf("main history len = %d, want initial history plus current turn", len(got))
+	}
+
+	weather, ok := al.GetRegistry().GetAgent("weather")
+	if !ok {
+		t.Fatal("weather agent was not registered")
+	}
+	weatherSession := "agent:weather:test-per-agent-profile"
+	weatherHistory := []providers.Message{{Role: "user", Content: "WEATHER_HISTORY", CreatedAt: &testTime}}
+	weather.Sessions.SetHistory(weatherSession, weatherHistory)
+	if _, err := al.runAgentLoop(context.Background(), weather, processOptions{
+		SessionKey:      weatherSession,
+		UserMessage:     "weather current",
+		DefaultResponse: defaultResponse,
+	}); err != nil {
+		t.Fatalf("runAgentLoop(weather) error = %v", err)
+	}
+	if len(provider.messages) != 2 || provider.messages[1].Content != "weather current" {
+		t.Fatalf("weather messages = %#v, want history omitted", provider.messages)
+	}
+	if got := weather.Sessions.GetHistory(weatherSession); !reflect.DeepEqual(got, weatherHistory) {
+		t.Fatalf("weather history = %#v, want unchanged history while mode is off", got)
 	}
 }
 
@@ -437,51 +518,161 @@ func TestTurnProfile_SubTurnInheritsParentToolProfile(t *testing.T) {
 	}
 }
 
-func TestTurnProfile_SystemPromptOffUsesExternalPromptOnly(t *testing.T) {
+func TestTurnProfile_SystemPromptOffUsesMinimalPrompt(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "AGENT.md"), []byte(`---
+name: Frontmatter Name
+model: frontmatter-model
+tools: [echo_text]
+skills: [minimal-skill]
+---
+MINIMAL_AGENT_BODY
+`), 0o644); err != nil {
+		t.Fatalf("write AGENT.md: %v", err)
+	}
+	for name, content := range map[string]string{
+		"SOUL.md":     "SOUL_SECRET",
+		"USER.md":     "USER_SECRET",
+		"IDENTITY.md": "IDENTITY_SECRET",
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir memory: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workspace, "memory", "MEMORY.md"),
+		[]byte("MEMORY_SECRET"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write memory: %v", err)
+	}
+	writeTurnProfileSkill(
+		t,
+		workspace,
+		"minimal-skill",
+		"---\ndescription: minimal skill\n---\nACTIVE_SKILL_SECRET",
+	)
+
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
+				Workspace: workspace,
 				TurnProfile: config.TurnProfileConfig{
 					Enabled:      true,
-					History:      config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
 					SystemPrompt: config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
-					Skills:       config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
-					Tools:        config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
 				},
 			},
 		},
 	}
 	provider := &turnProfileCaptureProvider{}
 	al := newTurnProfileAgentLoop(t, cfg, provider)
+	al.RegisterTool(&echoTextTool{})
+	al.RegisterTool(&echoTextRewrittenTool{})
 	agent := al.GetRegistry().GetDefaultAgent()
+	if agent.Model != "frontmatter-model" {
+		t.Fatalf("agent model = %q, want AGENT.md frontmatter model", agent.Model)
+	}
+	sessionKey := "agent:default:test-minimal-prompt"
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	history := []providers.Message{
+		{Role: "user", Content: "old user", CreatedAt: &ts},
+		{Role: "assistant", Content: "old assistant", CreatedAt: &ts},
+	}
+	agent.Sessions.SetHistory(sessionKey, history)
+	agent.Sessions.SetSummary(sessionKey, "SUMMARY_SECRET")
 
 	_, err := al.runAgentLoop(context.Background(), agent, processOptions{
-		SessionKey:           "agent:default:test-external-prompt",
+		SessionKey:           sessionKey,
+		Channel:              "telegram",
+		ChatID:               "chat-42",
+		SenderID:             "sender-42",
+		SenderDisplayName:    "Ada",
 		UserMessage:          "hello",
+		ForcedSkills:         []string{"minimal-skill"},
 		DefaultResponse:      defaultResponse,
-		SystemPromptOverride: "External prompt only.",
+		SystemPromptOverride: "EXTERNAL_PROMPT_SECRET",
 	})
 	if err != nil {
 		t.Fatalf("runAgentLoop() error = %v", err)
 	}
-	if len(provider.messages) != 2 {
-		t.Fatalf("messages len = %d, want system + user", len(provider.messages))
+	if len(provider.messages) != 4 {
+		t.Fatalf("messages len = %d, want system + history + user", len(provider.messages))
 	}
-	if strings.TrimSpace(provider.messages[0].Content) != "External prompt only." {
-		t.Fatalf("system prompt = %q, want external only", provider.messages[0].Content)
+	if !reflect.DeepEqual(provider.messages[1:3], history) {
+		t.Fatalf("provider history = %#v, want %#v", provider.messages[1:3], history)
+	}
+
+	prompt := provider.messages[0].Content
+	parts := strings.Split(prompt, "\n\n")
+	if len(parts) != 4 {
+		t.Fatalf("minimal prompt parts = %d, want AGENT body + time + session + sender:\n%s", len(parts), prompt)
+	}
+	if parts[0] != "MINIMAL_AGENT_BODY" {
+		t.Fatalf("AGENT.md body = %q, want body only", parts[0])
+	}
+	const timePrefix = "## Current Time\n"
+	if !strings.HasPrefix(parts[1], timePrefix) {
+		t.Fatalf("current time section = %q", parts[1])
+	}
+	if _, err := time.Parse("2006-01-02 15:04 (Monday)", strings.TrimPrefix(parts[1], timePrefix)); err != nil {
+		t.Fatalf("current time uses unexpected format: %q: %v", parts[1], err)
+	}
+	if parts[2] != "## Current Session\nChannel: telegram\nChat ID: chat-42" {
+		t.Fatalf("current session section = %q, want channel and chat ID", parts[2])
+	}
+	wantSender := "## Current Sender\n" + formatCurrentSenderLine("sender-42", "Ada")
+	if parts[3] != wantSender {
+		t.Fatalf("current sender section = %q, want %q", parts[3], wantSender)
+	}
+
+	for _, forbidden := range []string{
+		"name: Frontmatter Name",
+		"model: frontmatter-model",
+		"tools: [echo_text]",
+		"# picoclaw",
+		"## Workspace",
+		"## Important Rules",
+		"SOUL_SECRET",
+		"USER_SECRET",
+		"IDENTITY_SECRET",
+		"MEMORY_SECRET",
+		"# Skills",
+		"# Active Skills",
+		"ACTIVE_SKILL_SECRET",
+		"## Runtime",
+		"CONTEXT_SUMMARY",
+		"SUMMARY_SECRET",
+		"EXTERNAL_PROMPT_SECRET",
+		toolUseSystemPromptRule(),
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("minimal prompt contains forbidden content %q:\n%s", forbidden, prompt)
+		}
+	}
+	if len(provider.tools) != 1 || provider.tools[0].Function.Name != "echo_text" {
+		t.Fatalf("provider tools = %#v, want AGENT.md-allowed echo_text", provider.tools)
 	}
 }
 
-func TestTurnProfile_SystemPromptOffBlankTurnStillSendsMessage(t *testing.T) {
+func TestTurnProfile_SystemPromptOffWithoutAgentStillIncludesTimeAndSender(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(workspace, "AGENTS.md"),
+		[]byte("LEGACY_AGENT_SECRET"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
+				Workspace: workspace,
 				TurnProfile: config.TurnProfileConfig{
 					Enabled:      true,
-					History:      config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
 					SystemPrompt: config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
-					Skills:       config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
-					Tools:        config.TurnProfileBlock{Mode: config.TurnProfileModeOff},
 				},
 			},
 		},
@@ -490,26 +681,101 @@ func TestTurnProfile_SystemPromptOffBlankTurnStillSendsMessage(t *testing.T) {
 	al := newTurnProfileAgentLoop(t, cfg, provider)
 
 	_, err := al.runAgentLoop(context.Background(), al.GetRegistry().GetDefaultAgent(), processOptions{
-		SessionKey:      "agent:default:test-blank-system-off",
-		UserMessage:     "",
+		SessionKey:      "agent:default:test-missing-agent-system-off",
+		SenderID:        "sender-only",
+		UserMessage:     "hello",
 		DefaultResponse: defaultResponse,
 	})
 	if err != nil {
 		t.Fatalf("runAgentLoop() error = %v", err)
 	}
-	if len(provider.messages) != 1 {
-		t.Fatalf(
-			"provider messages len = %d, want one blank user message: %#v",
-			len(provider.messages),
-			provider.messages,
-		)
+	if len(provider.messages) != 2 {
+		t.Fatalf("provider messages len = %d, want system + user: %#v", len(provider.messages), provider.messages)
 	}
-	if provider.messages[0].Role != "user" || provider.messages[0].Content != "" {
-		t.Fatalf("provider message = %#v, want blank user message", provider.messages[0])
+	prompt := provider.messages[0].Content
+	parts := strings.Split(prompt, "\n\n")
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "## Current Time\n") {
+		t.Fatalf("minimal prompt without AGENT.md = %q", prompt)
+	}
+	wantSender := "## Current Sender\n" + formatCurrentSenderLine("sender-only", "")
+	if parts[1] != wantSender {
+		t.Fatalf("current sender section = %q, want %q", parts[1], wantSender)
+	}
+	if strings.Contains(prompt, "LEGACY_AGENT_SECRET") {
+		t.Fatalf("minimal prompt used legacy AGENTS.md: %q", prompt)
 	}
 }
 
-func TestTurnProfile_SystemPromptOffAddsToolFallbackWhenToolsVisible(t *testing.T) {
+func TestTurnProfile_DefaultSystemPromptBehaviorIsUnchanged(t *testing.T) {
+	workspace := t.TempDir()
+	for name, content := range map[string]string{
+		"AGENT.md": "NORMAL_AGENT_BODY",
+		"SOUL.md":  "NORMAL_SOUL_BODY",
+		"USER.md":  "NORMAL_USER_BODY",
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeTurnProfileSkill(
+		t,
+		workspace,
+		"normal-skill",
+		"---\ndescription: normal skill\n---\nNORMAL_ACTIVE_SKILL_BODY",
+	)
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: workspace,
+				TurnProfile: config.TurnProfileConfig{
+					Enabled:      true,
+					SystemPrompt: config.TurnProfileBlock{Mode: config.TurnProfileModeDefault},
+				},
+			},
+		},
+	}
+	provider := &turnProfileCaptureProvider{}
+	al := newTurnProfileAgentLoop(t, cfg, provider)
+
+	_, err := al.runAgentLoop(context.Background(), al.GetRegistry().GetDefaultAgent(), processOptions{
+		SessionKey:        "agent:default:test-default-system-prompt",
+		Channel:           "telegram",
+		ChatID:            "chat-42",
+		SenderID:          "sender-42",
+		ForcedSkills:      []string{"normal-skill"},
+		UserMessage:       "hello",
+		DefaultResponse:   defaultResponse,
+		SenderDisplayName: "Ada",
+	})
+	if err != nil {
+		t.Fatalf("runAgentLoop() error = %v", err)
+	}
+	if len(provider.messages) != 2 || provider.messages[0].Role != "system" {
+		t.Fatalf("provider messages = %#v, want system + user", provider.messages)
+	}
+	prompt := provider.messages[0].Content
+	for _, expected := range []string{
+		"# picoclaw",
+		"## Workspace",
+		"## Important Rules",
+		"NORMAL_AGENT_BODY",
+		"NORMAL_SOUL_BODY",
+		"NORMAL_USER_BODY",
+		"# Skills",
+		"# Active Skills",
+		"NORMAL_ACTIVE_SKILL_BODY",
+		"## Current Time",
+		"## Runtime",
+		"## Current Session",
+		"## Current Sender",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("default system prompt missing %q:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestTurnProfile_SystemPromptOffDoesNotAddToolFallbackWhenToolsVisible(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -539,8 +805,14 @@ func TestTurnProfile_SystemPromptOffAddsToolFallbackWhenToolsVisible(t *testing.
 	if err != nil {
 		t.Fatalf("runAgentLoop() error = %v", err)
 	}
-	if got := strings.TrimSpace(provider.messages[0].Content); got != toolUseSystemPromptRule() {
-		t.Fatalf("fallback prompt = %q, want existing tool rule %q", got, toolUseSystemPromptRule())
+	if len(provider.tools) != 1 || provider.tools[0].Function.Name != "echo_text" {
+		t.Fatalf("provider tools = %#v, want echo_text", provider.tools)
+	}
+	if got := provider.messages[0].Content; strings.Contains(got, toolUseSystemPromptRule()) {
+		t.Fatalf("minimal prompt contains tool fallback: %q", got)
+	}
+	if !strings.HasPrefix(provider.messages[0].Content, "## Current Time\n") {
+		t.Fatalf("minimal prompt missing current time: %q", provider.messages[0].Content)
 	}
 }
 
@@ -925,7 +1197,7 @@ func TestTurnProfile_ToolsCustomAllowsNativeWebSearch(t *testing.T) {
 	}
 }
 
-func TestTurnProfile_SystemPromptOffAddsToolFallbackForNativeWebSearch(t *testing.T) {
+func TestTurnProfile_SystemPromptOffOmitsToolFallbackForNativeWebSearch(t *testing.T) {
 	cfg := &config.Config{
 		Tools: config.ToolsConfig{
 			Web: config.WebToolsConfig{
@@ -970,8 +1242,11 @@ func TestTurnProfile_SystemPromptOffAddsToolFallbackForNativeWebSearch(t *testin
 	if got, _ := provider.lastOpts["native_search"].(bool); !got {
 		t.Fatalf("native_search = %#v, want true", provider.lastOpts["native_search"])
 	}
-	if len(provider.messages) == 0 || provider.messages[0].Content != toolUseSystemPromptRule() {
-		t.Fatalf("native-search-only prompt = %#v, want tool fallback", provider.messages)
+	if len(provider.messages) == 0 || !strings.HasPrefix(provider.messages[0].Content, "## Current Time\n") {
+		t.Fatalf("native-search-only prompt = %#v, want minimal prompt", provider.messages)
+	}
+	if strings.Contains(provider.messages[0].Content, toolUseSystemPromptRule()) {
+		t.Fatalf("native-search-only prompt contains tool fallback: %#v", provider.messages)
 	}
 }
 
