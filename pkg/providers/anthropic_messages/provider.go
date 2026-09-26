@@ -70,14 +70,6 @@ func NewProviderWithTimeout(apiKey, apiBase, userAgent string, timeoutSeconds in
 	}
 }
 
-// NewProviderWithHeaders creates a provider with custom and session headers.
-func NewProviderWithHeaders(apiKey, apiBase, userAgent string, timeoutSeconds int, customHeaders map[string]string, sessionHeaderName string) *Provider {
-	p := NewProviderWithTimeout(apiKey, apiBase, userAgent, timeoutSeconds)
-	p.customHeaders = customHeaders
-	p.sessionHeaderName = sessionHeaderName
-	return p
-}
-
 // NewProviderWithProxyAndHeaders creates a provider with optional proxy routing
 // and custom and session headers.
 func NewProviderWithProxyAndHeaders(
@@ -86,7 +78,9 @@ func NewProviderWithProxyAndHeaders(
 	customHeaders map[string]string,
 	sessionHeaderName string,
 ) *Provider {
-	p := NewProviderWithHeaders(apiKey, apiBase, userAgent, timeoutSeconds, customHeaders, sessionHeaderName)
+	p := NewProviderWithTimeout(apiKey, apiBase, userAgent, timeoutSeconds)
+	p.customHeaders = customHeaders
+	p.sessionHeaderName = sessionHeaderName
 	if strings.TrimSpace(proxy) != "" {
 		p.httpClient.Transport = common.NewHTTPClient(strings.TrimSpace(proxy)).Transport
 	}

@@ -85,7 +85,10 @@ func (s *modelProbeCacheState) resetForTest() {
 }
 
 func hasModelConfiguration(m *config.ModelConfig) bool {
-	protocol := modelProtocol(m)
+	protocol, modelID := splitModel(m)
+	if (protocol == "opencode" || protocol == "opencode-go") && !providers.IsSupportedOpenCodeModel(protocol, modelID) {
+		return false
+	}
 	authMethod := strings.ToLower(strings.TrimSpace(m.AuthMethod))
 	apiKeyConfigured := m.HasAPIKey()
 

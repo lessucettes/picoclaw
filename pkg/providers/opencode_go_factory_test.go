@@ -10,6 +10,17 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
+func TestOpenCodeGoRejectsTermsRestrictedFreeModel(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "account-key")
+	t.Setenv("OPENCODE_ZEN_API_KEY", "zen-only-key")
+	cfg := &config.ModelConfig{Provider: "opencode-go", Model: "space-bunny-free"}
+	cfg.SetAPIKey("account-key")
+	_, _, err := CreateProviderFromConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "no verified endpoint") {
+		t.Fatalf("CreateProviderFromConfig() error = %v, want unsupported model error", err)
+	}
+}
+
 func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -20,6 +31,7 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 		{name: "responses explicit", model: "grok-4.7", family: "responses"},
 		{name: "responses legacy", model: "grok-4.7", family: "responses", legacyID: true},
 		{name: "messages explicit", model: "qwen3.8-flash", family: "messages"},
+		{name: "messages model routed differently in regular Zen", model: "minimax-m3", family: "messages"},
 		{name: "messages legacy", model: "qwen3.8-flash", family: "messages", legacyID: true},
 		{name: "chat explicit", model: "kimi-k3", family: "chat"},
 		{name: "chat legacy", model: "kimi-k3", family: "chat", legacyID: true},

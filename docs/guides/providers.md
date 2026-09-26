@@ -16,6 +16,7 @@
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai)                       |
 | `anthropic`  | LLM (Claude direct)                     | [console.anthropic.com](https://console.anthropic.com)       |
 | `openai`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)           |
+| `opencode` | LLM (OpenCode Zen; per-model API) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen) |
 | `opencode-go` | LLM (OpenCode Go; Chat, Messages, and Responses models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
 | `venice`     | LLM (Venice AI direct)                  | [venice.ai](https://venice.ai)                               |
 | `nearai`     | LLM (NEAR AI Cloud TEE inference)       | [near.ai](https://near.ai)                                   |
@@ -75,7 +76,8 @@ This design also enables **multi-agent support** with flexible provider selectio
 | **LongCat**         | `longcat`         | `https://api.longcat.chat/openai`                   | OpenAI    | [Get Key](https://longcat.chat/platform)                         |
 | **ModelScope (魔搭)**| `modelscope`     | `https://api-inference.modelscope.cn/v1`            | OpenAI    | [Get Token](https://modelscope.cn/my/tokens)                     |
 | **Xiaomi MiMo**     | `mimo`            | `https://api.xiaomimimo.com/v1`                     | OpenAI    | [Get Key](https://platform.xiaomimimo.com)                       |
-| **OpenCode Go**     | `opencode-go`     | `https://opencode.ai/zen/go/v1`                     | By model  | [Go setup and subscription](https://opencode.ai/docs/go/)         |
+| **OpenCode Zen**   | `opencode`        | `https://opencode.ai/zen/v1`                     | By model  | [Zen setup](https://opencode.ai/docs/zen)             |
+| **OpenCode Go**     | `opencode-go`     | `https://opencode.ai/zen/go/v1`                  | By model  | [Go setup and subscription](https://opencode.ai/docs/go/)         |
 | **Azure OpenAI**    | `azure`           | `https://{resource}.openai.azure.com`               | Azure     | [Get Key](https://portal.azure.com)                              |
 | **Antigravity**     | `antigravity`     | Google Cloud                                        | Custom    | OAuth only                                                       |
 | **GitHub Copilot**  | `github-copilot`  | `localhost:4321`                                    | gRPC      | -                                                                |
@@ -350,6 +352,31 @@ For direct Anthropic API access or custom endpoints that only support Anthropic'
 >
 > **Note:** The `anthropic` protocol uses OpenAI-compatible format (`/v1/chat/completions`), while `anthropic-messages` uses Anthropic's native format (`/v1/messages`). Choose based on your endpoint's supported format.
 
+**OpenCode Zen**
+
+OpenCode Zen uses OpenCode's canonical API credential, `OPENCODE_API_KEY`, shared with OpenCode Go when the account has the applicable entitlement. You may set `OPENCODE_ZEN_API_KEY` to override the shared key for Zen-specific configuration:
+
+```sh
+export OPENCODE_API_KEY='your-opencode-api-key'
+```
+
+```json
+{
+  "model_name": "zen-kimi",
+  "provider": "opencode",
+  "model": "kimi-k3",
+  "enabled": true
+}
+```
+
+A configured `api_keys` entry takes precedence over `OPENCODE_ZEN_API_KEY`, which overrides the shared `OPENCODE_API_KEY`. PicoClaw requires an account API key for every supported Zen model. Models whose terms reserve use to OpenCode's own client are intentionally excluded. The environment values are resolved only when constructing the provider; model-management APIs and config writes do not expose or persist them. With an explicit `provider`, use the bare model ID; the legacy form `"model": "opencode/kimi-k3"` remains supported. Set `api_base` to override `https://opencode.ai/zen/v1`; environment-only entries should set `"enabled": true` explicitly.
+
+PicoClaw follows OpenCode's [Zen endpoint table](https://opencode.ai/docs/zen): GPT, Grok, and Muse Spark use Responses; Claude and Qwen use Anthropic Messages; Gemini uses `generateContent`; DeepSeek, MiniMax, GLM, and Kimi use Chat Completions. The regular Zen and Go routes stay separate even when a paid model ID overlaps: for example, `minimax-m3` uses Chat Completions in Zen but Anthropic Messages in Go.
+
+OpenCode's free-tier models are reserved by its terms for use in OpenCode's own client; PicoClaw excludes them from its routable catalog, model suggestions, and examples. Unknown model IDs also fail closed when no verified conversational endpoint family is available.
+
+PicoClaw sends the conversation session key as `x-opencode-session` for gateway affinity. Proxy settings are used by each supported Zen transport. Chat Completions and Gemini support the existing streaming path; Messages and Responses are non-streaming. The native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses uses the standard `max_tokens` option as `max_output_tokens`.
+
 **OpenCode Go**
 
 OpenCode Go is a subscription service with a model catalog that uses different API protocols by model. See the [official Go documentation](https://opencode.ai/docs/go/) for subscription and account setup. Configure `OPENCODE_API_KEY` in the PicoClaw process environment:
@@ -375,7 +402,7 @@ A complete configuration using the native provider ID is:
 
 A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The environment value is resolved only when constructing the provider; it is not returned by model-management APIs or written to the config or `.security.yml`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. When `provider` is set, use a bare model ID from the catalog (IDs are exact and case-sensitive). Set `api_base` to override `https://opencode.ai/zen/go/v1`. Environment-only entries should set `"enabled": true` explicitly.
 
-OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch reads `/models`, but that catalog does not establish a model's protocol family. Configure `proxy` to route requests through a proxy; it is honored by all three transports.
+OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch filters `/models` to IDs with a verified conversational route; catalog presence alone does not establish a model's protocol family. Configure `proxy` to route requests through a proxy; it is honored by all three transports.
 
 PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Messages and Responses are currently non-streaming. Native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses also ignores generic `temperature` and `thinking_level` settings and accepts the standard `max_tokens` option as `max_output_tokens`.
 

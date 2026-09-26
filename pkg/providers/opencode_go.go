@@ -34,7 +34,6 @@ var openCodeGoFamilies = map[string]string{
 	"mimo-v2.5-pro":                "chat",
 	"hy4-preview":                  "chat",
 	"hy3":                          "chat",
-	"space-bunny-free":             "chat",
 }
 
 func openCodeGoEndpointFamily(modelID string) string {

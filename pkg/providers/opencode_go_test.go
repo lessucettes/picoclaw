@@ -26,7 +26,6 @@ func TestOpenCodeGoCatalogAndRoutes(t *testing.T) {
 		{"kimi-k3", "chat"},
 		{"deepseek-v4-pro", "chat"},
 		{"hy4-preview", "chat"},
-		{"space-bunny-free", "chat"},
 		{"claude-opus-4-6", ""},
 		{"grok-4.5", ""},
 		{"omen-alpha", ""},

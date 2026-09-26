@@ -48,18 +48,18 @@ func TestOpenCodeSessionMessagesHeader(t *testing.T) {
 			}))
 			defer server.Close()
 
-			provider := NewProviderWithHeaders(
+			sessionHeaderName := ""
+			if tc.sessionHeader {
+				sessionHeaderName = "x-opencode-session"
+			}
+			provider := NewProviderWithProxyAndHeaders(
 				"test-key",
 				server.URL,
+				"",
 				"PicoClaw/test",
 				0,
 				tc.customHeaders,
-				func() string {
-					if tc.sessionHeader {
-						return "x-opencode-session"
-					}
-					return ""
-				}(),
+				sessionHeaderName,
 			)
 			response, err := provider.Chat(
 				t.Context(),

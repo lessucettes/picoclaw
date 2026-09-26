@@ -454,6 +454,31 @@ func TestHasModelConfiguration_OAuthWithoutMappedCredentialFallsBackToAPIKey(t *
 	}
 }
 
+func TestHasModelConfiguration_RejectsTermsRestrictedOpenCodeModels(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "account-key")
+	t.Setenv("OPENCODE_ZEN_API_KEY", "zen-key")
+
+	for _, tc := range []struct {
+		name     string
+		provider string
+		model    string
+		apiBase  string
+	}{
+		{name: "Zen catalog model", provider: "opencode", model: "big-pickle"},
+		{name: "Zen legacy model ID", model: "opencode/big-pickle"},
+		{name: "Zen free sibling", provider: "opencode", model: "muse-spark-1.3-contributor-free"},
+		{name: "Zen custom base", provider: "opencode", model: "big-pickle", apiBase: "https://gateway.example/v1"},
+		{name: "Go free model", provider: "opencode-go", model: "space-bunny-free"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &config.ModelConfig{Provider: tc.provider, Model: tc.model, APIBase: tc.apiBase}
+			if got := hasModelConfiguration(model); got {
+				t.Fatal("hasModelConfiguration() = true for a terms-restricted OpenCode model")
+			}
+		})
+	}
+}
+
 func TestHandleListModels_AntigravityImplicitOAuthAvailability(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
@@ -4102,59 +4127,133 @@ func TestHandleFetchModels_ModelIndexProviderMismatchRejectsKey(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 }
 
-func TestOpenCodeGoEnvironmentKeyIsNotExposedOrPersistedByModelAPI(t *testing.T) {
-	const secret = "environment-only-test-secret"
-	t.Setenv("OPENCODE_API_KEY", secret)
+func TestHandleFetchModels_OpenCodeFiltersUnsupportedModels(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
 
-	writeModelChainConfig(t, configPath, []*config.ModelConfig{{
-		ModelName: "go-kimi",
-		Provider:  "opencode-go",
-		Model:     "kimi-k3",
-		Enabled:   true,
-	}}, "go-kimi", nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"big-pickle"},{"id":"gpt-5.5"},{"id":"muse-spark-1.3-contributor-free"},{"id":"future-model"}]}`)
+	}))
+	defer server.Close()
 
 	h := NewHandler(configPath)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
-
-	listRec := httptest.NewRecorder()
-	mux.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/models status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
-	}
-	var listResponse struct {
-		Models []struct {
-			APIKey    string `json:"api_key"`
-			Available bool   `json:"available"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listResponse); err != nil {
-		t.Fatalf("decode model list: %v", err)
-	}
-	if len(listResponse.Models) != 1 {
-		t.Fatalf("model count = %d, want 1", len(listResponse.Models))
-	}
-	if listResponse.Models[0].APIKey != "" || !listResponse.Models[0].Available || strings.Contains(listRec.Body.String(), secret) {
-		t.Fatalf("model list leaked or misreported environment-key model: %s", listRec.Body.String())
+	body := fmt.Sprintf(`{"provider":"opencode","api_key":"test-key","api_base":%q}`, server.URL)
+	req := httptest.NewRequest(http.MethodPost, "/api/models/fetch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	updated := updateModelAndLoadConfig(t, configPath, 0, `{
-		"model_name":"go-kimi",
-		"provider":"opencode-go",
-		"model":"kimi-k3",
-		"enabled":true
-	}`)
-	if got := len(updated.ModelList[0].APIKeys); got != 0 {
-		t.Fatalf("stored API key count after env-only update = %d, want 0", got)
+	var response struct {
+		Models []upstreamModel `json:"models"`
+		Total  int             `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Total != 1 || len(response.Models) != 1 || response.Models[0].ID != "gpt-5.5" {
+		t.Fatalf("models = %+v, total = %d; want only gpt-5.5", response.Models, response.Total)
+	}
+}
+
+func TestHandleListCatalogs_HidesUnsupportedOpenCodeModels(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	if err := SaveCatalog("opencode", "https://opencode.ai/zen/v1", "test-key", []CatalogModel{
+		{ID: "big-pickle"},
+		{ID: "gpt-5.5"},
+	}); err != nil {
+		t.Fatalf("SaveCatalog() error = %v", err)
 	}
 
-	securityConfig, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), config.SecurityConfigFile))
-	if err != nil {
-		t.Fatalf("read security config: %v", err)
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/models/catalog", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if strings.Contains(string(securityConfig), secret) {
-		t.Fatal("environment key was persisted to the security config")
+
+	var response struct {
+		Entries []CatalogEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Entries) != 1 || len(response.Entries[0].Models) != 1 || response.Entries[0].Models[0].ID != "gpt-5.5" {
+		t.Fatalf("catalog entries = %+v; want only gpt-5.5", response.Entries)
+	}
+}
+
+func TestOpenCodeEnvironmentKeysAreNotExposedOrPersistedByModelAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		envVar    string
+		provider  string
+		modelName string
+		model     string
+	}{
+		{name: "Go", envVar: "OPENCODE_API_KEY", provider: "opencode-go", modelName: "go-kimi", model: "kimi-k3"},
+		{name: "Zen shared key", envVar: "OPENCODE_API_KEY", provider: "opencode", modelName: "zen-shared", model: "kimi-k3"},
+		{name: "Zen override key", envVar: "OPENCODE_ZEN_API_KEY", provider: "opencode", modelName: "zen-paid", model: "kimi-k3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const marker = "environment-only-test-marker"
+			t.Setenv("OPENCODE_API_KEY", "")
+			t.Setenv("OPENCODE_ZEN_API_KEY", "")
+			t.Setenv(tc.envVar, marker)
+			configPath, cleanup := setupOAuthTestEnv(t)
+			defer cleanup()
+
+			writeModelChainConfig(t, configPath, []*config.ModelConfig{{
+				ModelName: tc.modelName,
+				Provider:  tc.provider,
+				Model:     tc.model,
+				Enabled:   true,
+			}}, tc.modelName, nil)
+
+			h := NewHandler(configPath)
+			mux := http.NewServeMux()
+			h.RegisterRoutes(mux)
+
+			listRec := httptest.NewRecorder()
+			mux.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+			if listRec.Code != http.StatusOK {
+				t.Fatalf("GET /api/models status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+			}
+			var listResponse struct {
+				Models []struct {
+					APIKey    string `json:"api_key"`
+					Available bool   `json:"available"`
+				} `json:"models"`
+			}
+			if err := json.Unmarshal(listRec.Body.Bytes(), &listResponse); err != nil {
+				t.Fatalf("decode model list: %v", err)
+			}
+			if len(listResponse.Models) != 1 {
+				t.Fatalf("model count = %d, want 1", len(listResponse.Models))
+			}
+			if listResponse.Models[0].APIKey != "" || !listResponse.Models[0].Available || strings.Contains(listRec.Body.String(), marker) {
+				t.Fatalf("model list leaked or misreported environment-key model: %s", listRec.Body.String())
+			}
+
+			updateBody := fmt.Sprintf(`{"model_name":%q,"provider":%q,"model":%q,"enabled":true}`, tc.modelName, tc.provider, tc.model)
+			updateModelAndLoadConfig(t, configPath, 0, updateBody)
+
+			securityConfig, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), config.SecurityConfigFile))
+			if err != nil {
+				t.Fatalf("read security config: %v", err)
+			}
+			if strings.Contains(string(securityConfig), marker) {
+				t.Fatal("environment key was persisted to the security config")
+			}
+		})
 	}
 }

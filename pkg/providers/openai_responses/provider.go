@@ -23,32 +23,22 @@ type Provider struct {
 	key, base, userAgent string
 	client               *http.Client
 	headers              map[string]string
-	sessionHeaderName    string
 }
 
-// NewProvider creates a Responses API provider using the OpenCode Go session header.
+const openCodeSessionHeaderName = "x-opencode-session"
+
+// NewProvider creates a Responses API provider using OpenCode session affinity.
 func NewProvider(key, base, proxy, userAgent string, timeoutSeconds int, headers map[string]string) *Provider {
-	return NewProviderWithSessionHeader(key, base, proxy, userAgent, timeoutSeconds, headers, "x-opencode-session")
-}
-
-// NewProviderWithSessionHeader creates a Responses API provider with an optional session header.
-func NewProviderWithSessionHeader(
-	key, base, proxy, userAgent string,
-	timeoutSeconds int,
-	headers map[string]string,
-	sessionHeaderName string,
-) *Provider {
 	client := common.NewHTTPClient(proxy)
 	if timeoutSeconds > 0 {
 		client.Timeout = time.Duration(timeoutSeconds) * time.Second
 	}
 	return &Provider{
-		key:               key,
-		base:              strings.TrimRight(base, "/"),
-		userAgent:         userAgent,
-		client:            client,
-		headers:           headers,
-		sessionHeaderName: sessionHeaderName,
+		key:       key,
+		base:      strings.TrimRight(base, "/"),
+		userAgent: userAgent,
+		client:    client,
+		headers:   headers,
 	}
 }
 
@@ -109,7 +99,7 @@ func (p *Provider) Chat(
 			request.Header.Set(name, value)
 		}
 	}
-	common.ApplySessionHeader(request.Header, options, p.sessionHeaderName)
+	common.ApplySessionHeader(request.Header, options, openCodeSessionHeaderName)
 
 	response, err := p.client.Do(request)
 	if err != nil {

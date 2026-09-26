@@ -110,6 +110,12 @@
       "provider": "opencode-go",
       "model": "kimi-k3",
       "enabled": false
+    },
+    {
+      "model_name": "opencode-zen-kimi",
+      "provider": "opencode",
+      "model": "kimi-k3",
+      "enabled": false
     }
   ],
   "channel_list": {

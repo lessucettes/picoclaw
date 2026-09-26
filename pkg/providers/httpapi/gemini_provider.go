@@ -21,12 +21,13 @@ const (
 )
 
 type GeminiProvider struct {
-	apiKey        string
-	apiBase       string
-	httpClient    *http.Client
-	extraBody     map[string]any
-	customHeaders map[string]string
-	userAgent     string
+	apiKey            string
+	apiBase           string
+	httpClient        *http.Client
+	extraBody         map[string]any
+	customHeaders     map[string]string
+	userAgent         string
+	sessionHeaderName string
 }
 
 func NewGeminiProvider(
@@ -38,6 +39,21 @@ func NewGeminiProvider(
 	extraBody map[string]any,
 	customHeaders map[string]string,
 ) *GeminiProvider {
+	return NewGeminiProviderWithSessionHeader(
+		apiKey, apiBase, proxy, userAgent, requestTimeoutSeconds, extraBody, customHeaders, "",
+	)
+}
+
+func NewGeminiProviderWithSessionHeader(
+	apiKey string,
+	apiBase string,
+	proxy string,
+	userAgent string,
+	requestTimeoutSeconds int,
+	extraBody map[string]any,
+	customHeaders map[string]string,
+	sessionHeaderName string,
+) *GeminiProvider {
 	if strings.TrimSpace(apiBase) == "" {
 		apiBase = geminiDefaultAPIBase
 	}
@@ -47,12 +63,13 @@ func NewGeminiProvider(
 	}
 
 	return &GeminiProvider{
-		apiKey:        strings.TrimSpace(apiKey),
-		apiBase:       strings.TrimRight(strings.TrimSpace(apiBase), "/"),
-		httpClient:    client,
-		extraBody:     cloneAnyMap(extraBody),
-		customHeaders: cloneStringMap(customHeaders),
-		userAgent:     strings.TrimSpace(userAgent),
+		apiKey:            strings.TrimSpace(apiKey),
+		apiBase:           strings.TrimRight(strings.TrimSpace(apiBase), "/"),
+		httpClient:        client,
+		extraBody:         cloneAnyMap(extraBody),
+		customHeaders:     cloneStringMap(customHeaders),
+		userAgent:         strings.TrimSpace(userAgent),
+		sessionHeaderName: strings.TrimSpace(sessionHeaderName),
 	}
 }
 
@@ -88,7 +105,7 @@ func (p *GeminiProvider) Chat(
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	p.applyHeaders(req)
+	p.applyHeaders(req, options)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -155,7 +172,7 @@ func (p *GeminiProvider) ChatStreamEvents(
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	p.applyHeaders(req)
+	p.applyHeaders(req, options)
 	req.Header.Set("Accept", "text/event-stream")
 
 	// Streaming should not use a whole-request timeout; context cancellation is the guard.
@@ -209,7 +226,7 @@ func (b *geminiStreamingReadIdleTimeoutBody) Close() error {
 	return b.body.Close()
 }
 
-func (p *GeminiProvider) applyHeaders(req *http.Request) {
+func (p *GeminiProvider) applyHeaders(req *http.Request, options map[string]any) {
 	req.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
 		req.Header.Set("X-Goog-Api-Key", p.apiKey)
@@ -223,6 +240,7 @@ func (p *GeminiProvider) applyHeaders(req *http.Request) {
 		}
 		req.Header.Set(k, v)
 	}
+	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
 }
 
 func (p *GeminiProvider) buildRequestBody(

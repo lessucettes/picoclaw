@@ -85,6 +85,41 @@ func ResolveAPIBase(cfg *config.ModelConfig) string {
 	return strings.TrimRight(getDefaultAPIBase(protocol), "/")
 }
 
+const openCodeSessionHeaderName = "x-opencode-session"
+
+func newOpenCodeProvider(
+	providerName string,
+	family string,
+	apiKey string,
+	apiBase string,
+	userAgent string,
+	cfg *config.ModelConfig,
+) (LLMProvider, error) {
+	switch family {
+	case "responses":
+		return openairesponses.NewProvider(
+			apiKey, apiBase, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders,
+		), nil
+	case "messages":
+		return anthropicmessages.NewProviderWithProxyAndHeaders(
+			apiKey, apiBase, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, openCodeSessionHeaderName,
+		), nil
+	case "chat":
+		return openai_compat.NewProvider(apiKey, apiBase, cfg.Proxy,
+			openai_compat.WithProviderName(providerName), openai_compat.WithUserAgent(userAgent),
+			openai_compat.WithMaxTokensField(cfg.MaxTokensField),
+			openai_compat.WithRequestTimeout(time.Duration(cfg.RequestTimeout)*time.Second),
+			openai_compat.WithExtraBody(cfg.ExtraBody), openai_compat.WithCustomHeaders(cfg.CustomHeaders),
+			openai_compat.WithSessionHeaderName(openCodeSessionHeaderName)), nil
+	case "google":
+		return NewGeminiProviderWithSessionHeader(
+			apiKey, apiBase, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.ExtraBody, cfg.CustomHeaders, openCodeSessionHeaderName,
+		), nil
+	default:
+		return nil, fmt.Errorf("OpenCode model endpoint family %q is unsupported", family)
+	}
+}
+
 // CreateProviderFromConfig creates a provider based on the ModelConfig.
 // It uses ExtractProtocol to determine which provider to create.
 // Supported protocol families include OpenAI-compatible prefixes (e.g., openai, openrouter, groq),
@@ -241,26 +276,30 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 			return nil, "", fmt.Errorf("OpenCode Go model %q has no verified endpoint; check https://opencode.ai/docs/go/#endpoints", modelID)
 		}
 		base := ResolveAPIBase(cfg)
-		switch family {
-		case "responses":
-			provider := openairesponses.NewProviderWithSessionHeader(
-				apiKey, base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session",
-			)
-			return finalizeProviderFromConfig(provider, modelID, cfg)
-		case "messages":
-			provider := anthropicmessages.NewProviderWithProxyAndHeaders(
-				apiKey, base, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, "x-opencode-session",
-			)
-			return finalizeProviderFromConfig(provider, modelID, cfg)
-		default:
-			provider := openai_compat.NewProvider(apiKey, base, cfg.Proxy,
-				openai_compat.WithProviderName(protocol), openai_compat.WithUserAgent(userAgent),
-				openai_compat.WithMaxTokensField(cfg.MaxTokensField),
-				openai_compat.WithRequestTimeout(time.Duration(cfg.RequestTimeout)*time.Second),
-				openai_compat.WithExtraBody(cfg.ExtraBody), openai_compat.WithCustomHeaders(cfg.CustomHeaders),
-				openai_compat.WithSessionHeaderName("x-opencode-session"))
-			return finalizeProviderFromConfig(provider, modelID, cfg)
+		provider, err := newOpenCodeProvider("opencode-go", family, apiKey, base, userAgent, cfg)
+		if err != nil {
+			return nil, "", err
 		}
+		return finalizeProviderFromConfig(provider, modelID, cfg)
+
+	case "opencode":
+		family := openCodeZenEndpointFamily(modelID)
+		if family == "" {
+			return nil, "", fmt.Errorf("OpenCode Zen model %q has no verified endpoint; check https://opencode.ai/docs/zen#endpoints", modelID)
+		}
+		if family == "systemone" {
+			return nil, "", fmt.Errorf("model uses the SystemOne endpoint, which is not a conversational chat API")
+		}
+		base := ResolveAPIBase(cfg)
+		apiKey, err := openCodeZenAPIKey(cfg)
+		if err != nil {
+			return nil, "", err
+		}
+		provider, err := newOpenCodeProvider(protocol, family, apiKey, base, userAgent, cfg)
+		if err != nil {
+			return nil, "", err
+		}
+		return finalizeProviderFromConfig(provider, modelID, cfg)
 
 	case "gemini":
 		if cfg.APIKey() == "" && cfg.APIBase == "" {

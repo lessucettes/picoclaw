@@ -789,9 +789,7 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	// Preserve the existing API key when the caller omits it (empty string).
 	// This lets the UI update api_base / proxy without clearing the stored secret.
 	if mc.APIKey == "" {
-		if existingKey := cfg.ModelList[idx].APIKey(); strings.TrimSpace(existingKey) != "" {
-			mc.ModelConfig.SetAPIKey(existingKey)
-		}
+		mc.ModelConfig.SetAPIKey(cfg.ModelList[idx].APIKey())
 	} else {
 		mc.ModelConfig.SetAPIKey(mc.APIKey)
 	}
@@ -1199,6 +1197,7 @@ func (h *Handler) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to fetch models: %v", err), http.StatusBadGateway)
 		return
 	}
+	models = filterOpenCodeUpstreamModels(req.Provider, models)
 
 	// Auto-save fetched models to catalog
 	catalogModels := make([]CatalogModel, len(models))
@@ -1269,6 +1268,21 @@ func fetchUpstreamModels(ctx context.Context, provider, apiBase, apiKey string) 
 		fetchURL = apiBase + "/models"
 		return fetchOpenAICompatibleModels(ctx, fetchURL, apiKey)
 	}
+}
+
+func filterOpenCodeUpstreamModels(provider string, models []upstreamModel) []upstreamModel {
+	provider = providers.NormalizeProvider(provider)
+	if provider != "opencode" && provider != "opencode-go" {
+		return models
+	}
+
+	filtered := make([]upstreamModel, 0, len(models))
+	for _, model := range models {
+		if providers.IsSupportedOpenCodeModel(provider, model.ID) {
+			filtered = append(filtered, model)
+		}
+	}
+	return filtered
 }
 
 func fetchNearAIModels(ctx context.Context, fetchURL, apiKey string) ([]upstreamModel, error) {

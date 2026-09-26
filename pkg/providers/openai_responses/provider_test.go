@@ -111,25 +111,6 @@ func TestProviderChatSendsResponsesRequest(t *testing.T) {
 	}
 }
 
-func TestProviderChatUsesConfiguredSessionHeaderName(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("X-Conversation-Token"); got != "conversation:1" {
-			t.Errorf("X-Conversation-Token = %q, want conversation:1", got)
-		}
-		if got := r.Header.Get("x-opencode-session"); got != "" {
-			t.Errorf("unexpected x-opencode-session header = %q", got)
-		}
-		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[]}`))
-	}))
-	defer server.Close()
-
-	provider := NewProviderWithSessionHeader("test-key", server.URL, "", "PicoClaw/test", 0, nil, "X-Conversation-Token")
-	_, err := provider.Chat(t.Context(), []protocoltypes.Message{{Role: "user", Content: "hi"}}, nil, "grok-4.7", map[string]any{"session_key": "conversation:1"})
-	if err != nil {
-		t.Fatalf("Chat() error = %v", err)
-	}
-}
-
 func TestProviderChatCustomSessionHeaderOverridesOption(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("x-opencode-session"); got != "pinned" {

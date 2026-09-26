@@ -129,7 +129,9 @@ func (h *Handler) handleListCatalogs(w http.ResponseWriter, r *http.Request) {
 
 	entries := make([]*CatalogEntry, 0, len(store.Entries))
 	for _, e := range store.Entries {
-		entries = append(entries, e)
+		entry := *e
+		entry.Models = filterOpenCodeCatalogModels(entry.Provider, entry.Models)
+		entries = append(entries, &entry)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -137,6 +139,21 @@ func (h *Handler) handleListCatalogs(w http.ResponseWriter, r *http.Request) {
 		"entries": entries,
 		"total":   len(entries),
 	})
+}
+
+func filterOpenCodeCatalogModels(provider string, models []CatalogModel) []CatalogModel {
+	provider = providers.NormalizeProvider(provider)
+	if provider != "opencode" && provider != "opencode-go" {
+		return models
+	}
+
+	filtered := make([]CatalogModel, 0, len(models))
+	for _, model := range models {
+		if providers.IsSupportedOpenCodeModel(provider, model.ID) {
+			filtered = append(filtered, model)
+		}
+	}
+	return filtered
 }
 
 // handleDeleteCatalog deletes a saved model catalog by ID.

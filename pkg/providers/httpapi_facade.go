@@ -19,6 +19,21 @@ func NewGeminiProvider(
 	return httpapi.NewGeminiProvider(apiKey, apiBase, proxy, userAgent, requestTimeoutSeconds, extraBody, customHeaders)
 }
 
+func NewGeminiProviderWithSessionHeader(
+	apiKey string,
+	apiBase string,
+	proxy string,
+	userAgent string,
+	requestTimeoutSeconds int,
+	extraBody map[string]any,
+	customHeaders map[string]string,
+	sessionHeaderName string,
+) *GeminiProvider {
+	return httpapi.NewGeminiProviderWithSessionHeader(
+		apiKey, apiBase, proxy, userAgent, requestTimeoutSeconds, extraBody, customHeaders, sessionHeaderName,
+	)
+}
+
 func NewHTTPProvider(apiKey, apiBase, proxy string) *HTTPProvider {
 	return httpapi.NewHTTPProvider(apiKey, apiBase, proxy)
 }
