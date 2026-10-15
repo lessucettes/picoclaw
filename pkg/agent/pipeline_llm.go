@@ -388,10 +388,10 @@ func (p *Pipeline) CallLLM(
 			)
 
 			if retry == 0 && !constants.IsInternalChannel(ts.channel) {
-				al.bus.PublishOutbound(ctx, outboundMessageForTurn(
+				al.bus.PublishOutbound(ctx, withOutboundError(outboundMessageForTurn(
 					ts,
 					"Context window exceeded. Compressing history and retrying...",
-				))
+				), true))
 			}
 
 			if compactErr := p.ContextManager.Compact(ctx, &CompactRequest{

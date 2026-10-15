@@ -55,6 +55,7 @@ type MeshtasticSettings struct {
 	ChannelIndices []int  `json:"channel_indices,omitempty" yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_CHANNEL_INDICES"`
 	TextChunkBytes *int   `json:"text_chunk_bytes,omitempty" yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_TEXT_CHUNK_BYTES"`
 	SendDelayMS    *int   `json:"send_delay_ms,omitempty"    yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_SEND_DELAY_MS"`
+	SuppressErrors bool   `json:"suppress_errors,omitempty"  yaml:"-" env:"PICOCLAW_CHANNELS_MESHTASTIC_SUPPRESS_ERRORS"`
 	// Commands is a pointer so omitted (allow all) remains distinct from [] (block all).
 	Commands *[]string `json:"commands,omitempty"        yaml:"-"`
 }

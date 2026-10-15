@@ -101,6 +101,7 @@ type processOptions struct {
 	Media                   []string               // media:// refs from inbound message
 	InitialSteeringMessages []providers.Message    // Steering messages from refactor/agent
 	DefaultResponse         string                 // Response when LLM returns empty
+	DefaultResponseIsError  bool                   // The configured fallback is a runtime diagnostic
 	EnableSummary           bool                   // Whether to trigger summarization
 	SendResponse            bool                   // Whether to send response via bus
 	AllowInterimPicoPublish bool                   // Whether pico tool-call interim text can be published when SendResponse is false
@@ -583,7 +584,8 @@ func (al *AgentLoop) runAgentLoop(
 		}
 	}
 
-	if opts.SendResponse && result.finalContent != "" {
+	suppressDiagnostic := result.runtimeDiagnostic && al.channelSuppressesErrors(opts.Dispatch.Channel())
+	if opts.SendResponse && result.finalContent != "" && !suppressDiagnostic {
 		agentID, sessionKey, scope := outboundTurnMetadata(
 			agent.ID,
 			opts.Dispatch.SessionKey,
@@ -623,6 +625,9 @@ func (al *AgentLoop) runAgentLoop(
 			})
 	}
 
+	if suppressDiagnostic {
+		return "", nil
+	}
 	return result.finalContent, nil
 }
 

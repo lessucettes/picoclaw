@@ -223,7 +223,7 @@ toolLoop:
 					shouldSendForUser := !hookResult.Silent && hookResult.ForUser != "" &&
 						(ts.opts.SendResponse || hookResult.ResponseHandled)
 					if shouldSendForUser {
-						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
+						al.bus.PublishOutbound(ctx, withOutboundError(bus.OutboundMessage{
 							Context: bus.InboundContext{
 								Channel: ts.channel,
 								ChatID:  ts.chatID,
@@ -232,7 +232,7 @@ toolLoop:
 								},
 							},
 							Content: hookResult.ForUser,
-						})
+						}, hookResult.IsError))
 					}
 
 					if len(hookResult.Media) > 0 && hookResult.ResponseHandled {
@@ -516,7 +516,7 @@ toolLoop:
 			if !result.Silent && result.ForUser != "" {
 				outCtx, outCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer outCancel()
-				_ = al.bus.PublishOutbound(outCtx, outboundMessageForTurn(ts, result.ForUser))
+				_ = al.bus.PublishOutbound(outCtx, outboundMessageForToolResult(ts, result))
 			}
 
 			content := result.ContentForLLM()
@@ -677,7 +677,7 @@ toolLoop:
 			toolResult.ForUser != "" &&
 			(ts.opts.SendResponse || toolResult.ResponseHandled)
 		if shouldSendForUser {
-			al.bus.PublishOutbound(ctx, outboundMessageForTurn(ts, toolResult.ForUser))
+			al.bus.PublishOutbound(ctx, outboundMessageForToolResult(ts, toolResult))
 			logger.DebugCF("agent", "Sent tool result to user",
 				map[string]any{
 					"tool":        toolName,

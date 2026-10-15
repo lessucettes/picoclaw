@@ -83,10 +83,11 @@ const (
 // =============================================================================
 
 type turnResult struct {
-	finalContent string
-	modelName    string
-	status       TurnEndStatus
-	followUps    []bus.InboundMessage
+	runtimeDiagnostic bool
+	finalContent      string
+	modelName         string
+	status            TurnEndStatus
+	followUps         []bus.InboundMessage
 }
 
 // =============================================================================
@@ -121,7 +122,8 @@ type turnExecution struct {
 	currentTurnStart int
 
 	// Turn output
-	finalContent string
+	runtimeDiagnostic bool
+	finalContent      string
 
 	// Iteration tracking
 	iteration int

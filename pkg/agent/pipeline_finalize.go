@@ -81,7 +81,8 @@ func (p *Pipeline) Finalize(
 	// If streaming never became visible, keep the legacy Pico interim publish path
 	// so the final answer is still delivered outside normal SendResponse.
 	if ((streamErr != nil && !isConfiguredStreamingVisibleError(streamErr)) || exec.streamingFallback) &&
-		!ts.opts.SendResponse && ts.opts.AllowInterimPicoPublish && finalContent != "" {
+		!ts.opts.SendResponse && ts.opts.AllowInterimPicoPublish && finalContent != "" &&
+		!(exec.runtimeDiagnostic && al.channelSuppressesErrors(ts.channel)) {
 		msg := outboundMessageForTurnWithOptions(ts, finalContent, outboundTurnMessageOptions{
 			modelName: exec.llmModelName,
 		})
@@ -99,9 +100,10 @@ func (p *Pipeline) Finalize(
 	}
 	ts.setPhase(TurnPhaseCompleted)
 	return turnResult{
-		finalContent: finalContent,
-		modelName:    exec.llmModelName,
-		status:       turnStatus,
-		followUps:    append([]bus.InboundMessage(nil), ts.followUps...),
+		runtimeDiagnostic: exec.runtimeDiagnostic,
+		finalContent:      finalContent,
+		modelName:         exec.llmModelName,
+		status:            turnStatus,
+		followUps:         append([]bus.InboundMessage(nil), ts.followUps...),
 	}, nil
 }

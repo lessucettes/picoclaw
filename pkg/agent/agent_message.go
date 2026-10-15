@@ -93,12 +93,13 @@ func (al *AgentLoop) ProcessHeartbeat(
 		}
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
-		Dispatch:             dispatch,
-		DefaultResponse:      defaultResponse,
-		EnableSummary:        false,
-		SendResponse:         false,
-		SuppressToolFeedback: true,
-		NoHistory:            true, // Don't load session history for heartbeat
+		Dispatch:               dispatch,
+		DefaultResponse:        defaultResponse,
+		DefaultResponseIsError: true,
+		EnableSummary:          false,
+		SendResponse:           false,
+		SuppressToolFeedback:   true,
+		NoHistory:              true, // Don't load session history for heartbeat
 	})
 }
 
@@ -189,6 +190,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		SenderID:                msg.SenderID,
 		SenderDisplayName:       msg.Sender.DisplayName,
 		DefaultResponse:         defaultResponse,
+		DefaultResponseIsError:  true,
 		EnableSummary:           true,
 		SendResponse:            false,
 		AllowInterimPicoPublish: true,

@@ -20,7 +20,11 @@ func (al *AgentLoop) maybePublishError(ctx context.Context, channel, chatID, ses
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	al.PublishResponseIfNeeded(ctx, channel, chatID, sessionKey, formatProcessingError(err))
+	logger.ErrorCF("agent", "Message processing failed", map[string]any{
+		"channel": channel, "chat_id": chatID, "error": err.Error(),
+	})
+	al.publishResponseForInboundIfNeeded(ctx, channel, chatID, sessionKey, formatProcessingError(err),
+		&bus.InboundContext{Raw: map[string]string{"is_error": "true"}})
 	return true
 }
 

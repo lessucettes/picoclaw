@@ -330,6 +330,7 @@ func (al *AgentLoop) continueWithSteeringMessages(
 	return al.runAgentLoop(ctx, agent, processOptions{
 		Dispatch:                dispatch,
 		DefaultResponse:         defaultResponse,
+		DefaultResponseIsError:  true,
 		EnableSummary:           true,
 		SendResponse:            false,
 		InitialSteeringMessages: steeringMsgs,
