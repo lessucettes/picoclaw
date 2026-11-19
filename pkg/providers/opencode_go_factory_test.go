@@ -35,6 +35,8 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 		{name: "messages legacy", model: "qwen3.8-flash", family: "messages", legacyID: true},
 		{name: "chat explicit", model: "kimi-k3", family: "chat"},
 		{name: "chat legacy", model: "kimi-k3", family: "chat", legacyID: true},
+		{name: "chat longcat free", model: "longcat-2.5-free", family: "chat"},
+		{name: "chat iceman contributor free", model: "iceman-contributor-free", family: "chat"},
 	}
 
 	for _, tc := range tests {

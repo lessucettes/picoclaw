@@ -24,6 +24,8 @@ var openCodeGoFamilies = map[string]string{
 	"kimi-k2.7-code":               "chat",
 	"kimi-k2.6":                    "chat",
 	"longcat-2.0":                  "chat",
+	"longcat-2.5-free":             "chat",
+	"iceman-contributor-free":      "chat",
 	"deepseek-v4.1-flash":          "chat",
 	"deepseek-v4-pro":              "chat",
 	"deepseek-v4-flash":            "chat",
