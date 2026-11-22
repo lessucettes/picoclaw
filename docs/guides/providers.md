@@ -540,6 +540,8 @@ It also applies cooldown tracking per candidate to avoid immediately retrying a 
 
 If you use key-level failover for the same model, PicoClaw can chain through additional key-backed candidates before moving to cross-model backups.
 
+An HTTP `410 Gone` from an inference endpoint advances to the next configured candidate, whether the model or the endpoint itself was retired. PicoClaw retains the original error for diagnostics and does not treat unrelated unknown errors as a reason to switch.
+
 #### Migration from Legacy `providers` Config
 
 The old `providers` configuration is **deprecated** and has been removed in V2. Existing V0/V1 configs are auto-migrated.

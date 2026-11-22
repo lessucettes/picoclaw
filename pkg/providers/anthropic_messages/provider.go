@@ -144,6 +144,10 @@ func (p *Provider) Chat(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusGone {
+		return nil, common.HandleErrorResponse(resp, p.apiBase)
+	}
+
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -416,7 +416,8 @@ func (e *HTTPError) Error() string {
 func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	contentType := resp.Header.Get("Content-Type")
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256))
-	if readErr != nil {
+	// A confirmed 410 is enough to fail over, even if the diagnostic body is cut short.
+	if readErr != nil && resp.StatusCode != http.StatusGone {
 		return fmt.Errorf("failed to read response: %w", readErr)
 	}
 	if LooksLikeHTML(body, contentType) {

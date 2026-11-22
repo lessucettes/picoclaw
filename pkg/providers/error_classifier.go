@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"regexp"
 	"strings"
 	"syscall"
@@ -178,6 +179,20 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 		}
 	}
 
+	// A model endpoint returning Gone is unusable regardless of the response body.
+	// Require a real HTTP response: a bare 410 in error text is not a status.
+	var httpErr *common.HTTPError
+	hasHTTPStatus := errors.As(err, &httpErr) && httpErr != nil
+	if hasHTTPStatus && httpErr.StatusCode == http.StatusGone {
+		return &FailoverError{
+			Reason:   FailoverEndpointGone,
+			Provider: provider,
+			Model:    model,
+			Status:   httpErr.StatusCode,
+			Wrapped:  err,
+		}
+	}
+
 	msg := strings.ToLower(err.Error())
 
 	// Concrete transport errors should continue the fallback chain even when
@@ -202,8 +217,7 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	}
 
 	// Try HTTP status code extraction first.
-	var httpErr *common.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
+	if hasHTTPStatus {
 		if reason := classifyByStatus(httpErr.StatusCode); reason != "" {
 			return &FailoverError{
 				Reason:   reason,

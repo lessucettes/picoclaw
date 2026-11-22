@@ -92,6 +92,7 @@ const (
 	FailoverFormat          FailoverReason = "format"
 	FailoverContextOverflow FailoverReason = "context_overflow"
 	FailoverOverloaded      FailoverReason = "overloaded"
+	FailoverEndpointGone    FailoverReason = "endpoint_gone"
 	FailoverUnknown         FailoverReason = "unknown"
 )
 

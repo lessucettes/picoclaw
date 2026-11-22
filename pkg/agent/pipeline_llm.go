@@ -270,6 +270,17 @@ func (p *Pipeline) CallLLM(
 			if fbErr != nil {
 				return nil, fbErr
 			}
+			for _, attempt := range fbResult.Attempts {
+				if attempt.Reason == providers.FailoverEndpointGone {
+					logger.WarnCF("agent", "Model endpoint returned HTTP 410 Gone", map[string]any{
+						"agent_id":  ts.agent.ID,
+						"iteration": iteration,
+						"provider":  attempt.Provider,
+						"model":     attempt.Model,
+						"error":     attempt.Error.Error(),
+					})
+				}
+			}
 			if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
 				logger.InfoCF(
 					"agent",
