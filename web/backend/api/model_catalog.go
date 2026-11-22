@@ -143,7 +143,7 @@ func (h *Handler) handleListCatalogs(w http.ResponseWriter, r *http.Request) {
 
 func filterOpenCodeCatalogModels(provider string, models []CatalogModel) []CatalogModel {
 	provider = providers.NormalizeProvider(provider)
-	if provider != "opencode" && provider != "opencode-go" {
+	if provider != "opencode" {
 		return models
 	}
 

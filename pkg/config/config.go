@@ -792,9 +792,10 @@ type ModelConfig struct {
 	Model     string `json:"model"`      // Model identifier, optionally provider-prefixed.
 
 	// HTTP-based providers
-	APIBase   string   `json:"api_base,omitempty"`  // API endpoint URL
-	Proxy     string   `json:"proxy,omitempty"`     // HTTP proxy URL
-	Fallbacks []string `json:"fallbacks,omitempty"` // Fallback model names for failover
+	APIBase   string   `json:"api_base,omitempty"`   // API endpoint URL
+	APIFormat string   `json:"api_format,omitempty"` // OpenCode Go wire format: chat, messages, or responses
+	Proxy     string   `json:"proxy,omitempty"`      // HTTP proxy URL
+	Fallbacks []string `json:"fallbacks,omitempty"`  // Fallback model names for failover
 
 	// Special providers (CLI-based, OAuth, etc.)
 	AuthMethod  string `json:"auth_method,omitempty"`  // Authentication method: oauth, token
@@ -1847,6 +1848,7 @@ func expandMultiKeyModels(models []*ModelConfig) []*ModelConfig {
 				Provider:            m.Provider,
 				Model:               m.Model,
 				APIBase:             m.APIBase,
+				APIFormat:           m.APIFormat,
 				APIKeys:             SimpleSecureStrings(keys[i]),
 				Proxy:               m.Proxy,
 				AuthMethod:          m.AuthMethod,
@@ -1873,6 +1875,7 @@ func expandMultiKeyModels(models []*ModelConfig) []*ModelConfig {
 			Provider:            m.Provider,
 			Model:               m.Model,
 			APIBase:             m.APIBase,
+			APIFormat:           m.APIFormat,
 			Proxy:               m.Proxy,
 			AuthMethod:          m.AuthMethod,
 			ConnectMode:         m.ConnectMode,

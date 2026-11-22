@@ -77,7 +77,7 @@ This design also enables **multi-agent support** with flexible provider selectio
 | **ModelScope (魔搭)**| `modelscope`     | `https://api-inference.modelscope.cn/v1`            | OpenAI    | [Get Token](https://modelscope.cn/my/tokens)                     |
 | **Xiaomi MiMo**     | `mimo`            | `https://api.xiaomimimo.com/v1`                     | OpenAI    | [Get Key](https://platform.xiaomimimo.com)                       |
 | **OpenCode Zen**   | `opencode`        | `https://opencode.ai/zen/v1`                     | By model  | [Zen setup](https://opencode.ai/docs/zen)             |
-| **OpenCode Go**     | `opencode-go`     | `https://opencode.ai/zen/go/v1`                  | By model  | [Go setup and subscription](https://opencode.ai/docs/go/)         |
+| **OpenCode Go**     | `opencode-go`     | `https://opencode.ai/inference/go/openai/v1`     | Chat Completions | [Go setup and subscription](https://opencode.ai/docs/go/) |
 | **Azure OpenAI**    | `azure`           | `https://{resource}.openai.azure.com`               | Azure     | [Get Key](https://portal.azure.com)                              |
 | **Antigravity**     | `antigravity`     | Google Cloud                                        | Custom    | OAuth only                                                       |
 | **GitHub Copilot**  | `github-copilot`  | `localhost:4321`                                    | gRPC      | -                                                                |
@@ -379,7 +379,7 @@ PicoClaw sends the conversation session key as `x-opencode-session` for gateway 
 
 **OpenCode Go**
 
-OpenCode Go is a subscription service with a model catalog that uses different API protocols by model. See the [official Go documentation](https://opencode.ai/docs/go/) for subscription and account setup. Configure `OPENCODE_API_KEY` in the PicoClaw process environment:
+OpenCode Go is a subscription service that exposes its text models through compatible APIs. See the [official Go documentation](https://opencode.ai/docs/go/) for subscription and account setup. Configure `OPENCODE_API_KEY` in the PicoClaw process environment:
 
 ```sh
 export OPENCODE_API_KEY='your-opencode-go-key'
@@ -400,9 +400,11 @@ A complete configuration using the native provider ID is:
 }
 ```
 
-A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The environment value is resolved only when constructing the provider; it is not returned by model-management APIs or written to the config or `.security.yml`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. When `provider` is set, use a bare model ID from the catalog (IDs are exact and case-sensitive). Set `api_base` to override `https://opencode.ai/zen/go/v1`. Environment-only entries should set `"enabled": true` explicitly.
+A configured `api_keys` entry takes precedence over `OPENCODE_API_KEY`. The environment value is resolved only when constructing the provider; it is not returned by model-management APIs or written to the config or `.security.yml`. The legacy form `"model": "opencode-go/kimi-k3"` also works when `provider` is omitted. When `provider` is set, use the exact, case-sensitive model ID. Environment-only entries should set `"enabled": true` explicitly.
 
-OpenCode Go routes models by its published endpoint table: `grok-4.7` uses Responses, `qwen3.8-flash` uses Anthropic Messages, and `kimi-k3` uses Chat Completions. Unknown or undocumented model IDs fail with an endpoint-classification error rather than being guessed. The Web model fetch filters `/models` to IDs with a verified conversational route; catalog presence alone does not establish a model's protocol family. Configure `proxy` to route requests through a proxy; it is honored by all three transports.
+PicoClaw uses [Chat Completions](https://opencode.ai/docs/console/harnesses#base-urls) by default and passes the configured model ID directly to OpenCode Go. The web model picker shows the provider's `/models` catalog without a built-in list of IDs. Inference does not depend on fetching that catalog.
+
+Set `api_format` in the model's config entry to select the protocol explicitly. `chat` (the default) and `responses` use `https://opencode.ai/inference/go/openai/v1`; `messages` uses `https://opencode.ai/inference/go/anthropic/v1`. If an existing entry relied on automatic routing to Messages or Responses, set `api_format` to keep that protocol. `api_base` overrides the default for the selected format. All three transports honor `proxy`.
 
 PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Messages and Responses are currently non-streaming. Native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses also ignores generic `temperature` and `thinking_level` settings and accepts the standard `max_tokens` option as `max_output_tokens`.
 

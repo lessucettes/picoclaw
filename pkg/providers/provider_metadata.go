@@ -598,12 +598,11 @@ var modelProviderOptionsByName = map[string]ModelProviderOption{
 		DisplayName:         "OpenCode Go",
 		IconSlug:            "opencode",
 		Domain:              "opencode.ai",
-		DefaultAPIBase:      "https://opencode.ai/zen/go/v1",
+		DefaultAPIBase:      "https://opencode.ai/inference/go/openai/v1",
 		CreateAllowed:       true,
 		DefaultModelAllowed: true,
 		SupportsFetch:       true,
 		Priority:            33,
-		CommonModels:        []string{"kimi-k3", "grok-4.7", "glm-5.3", "qwen3.8-flash", "minimax-m3"},
 		httpAPI:             true,
 	},
 }

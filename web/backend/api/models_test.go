@@ -468,7 +468,6 @@ func TestHasModelConfiguration_RejectsTermsRestrictedOpenCodeModels(t *testing.T
 		{name: "Zen legacy model ID", model: "opencode/big-pickle"},
 		{name: "Zen free sibling", provider: "opencode", model: "muse-spark-1.3-contributor-free"},
 		{name: "Zen custom base", provider: "opencode", model: "big-pickle", apiBase: "https://gateway.example/v1"},
-		{name: "Go free model", provider: "opencode-go", model: "space-bunny-free"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &config.ModelConfig{Provider: tc.provider, Model: tc.model, APIBase: tc.apiBase}
@@ -4127,6 +4126,45 @@ func TestHandleFetchModels_ModelIndexProviderMismatchRejectsKey(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 }
 
+func TestHandleFetchModels_OpenCodeGoKeepsUpstreamIDs(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/models" {
+			t.Errorf("catalog request = %s %s, want GET /models", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"Vendor/Future-Model"},{"id":"future-model-free"}]}`)
+	}))
+	defer server.Close()
+
+	mux := http.NewServeMux()
+	NewHandler(configPath).RegisterRoutes(mux)
+	body := fmt.Sprintf(`{"provider":"opencode-go","api_key":"test-key","api_base":%q}`, server.URL)
+	fetch := httptest.NewRecorder()
+	mux.ServeHTTP(fetch, httptest.NewRequest(http.MethodPost, "/api/models/fetch", strings.NewReader(body)))
+	var fetched struct {
+		Models []upstreamModel `json:"models"`
+	}
+	if err := json.Unmarshal(fetch.Body.Bytes(), &fetched); fetch.Code != http.StatusOK || err != nil {
+		t.Fatalf("fetch catalog: status=%d, decode error=%v", fetch.Code, err)
+	}
+	saved := httptest.NewRecorder()
+	mux.ServeHTTP(saved, httptest.NewRequest(http.MethodGet, "/api/models/catalog", nil))
+	var catalog struct {
+		Entries []CatalogEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(saved.Body.Bytes(), &catalog); saved.Code != http.StatusOK || err != nil {
+		t.Fatalf("read saved catalog: status=%d, decode error=%v", saved.Code, err)
+	}
+	if len(fetched.Models) != 2 || fetched.Models[0].ID != "Vendor/Future-Model" || fetched.Models[1].ID != "future-model-free" {
+		t.Fatalf("fetched models = %+v, want both upstream IDs unchanged", fetched.Models)
+	}
+	if len(catalog.Entries) != 1 || len(catalog.Entries[0].Models) != 2 || catalog.Entries[0].Models[0].ID != "Vendor/Future-Model" || catalog.Entries[0].Models[1].ID != "future-model-free" {
+		t.Fatalf("saved catalog = %+v, want both upstream IDs unchanged", catalog.Entries)
+	}
+}
+
 func TestHandleFetchModels_OpenCodeFiltersUnsupportedModels(t *testing.T) {
 	configPath, cleanup := setupOAuthTestEnv(t)
 	defer cleanup()
@@ -4200,7 +4238,7 @@ func TestOpenCodeEnvironmentKeysAreNotExposedOrPersistedByModelAPI(t *testing.T)
 		modelName string
 		model     string
 	}{
-		{name: "Go", envVar: "OPENCODE_API_KEY", provider: "opencode-go", modelName: "go-kimi", model: "kimi-k3"},
+		{name: "Go", envVar: "OPENCODE_API_KEY", provider: "opencode-go", modelName: "go-future", model: "Vendor/Future-Model"},
 		{name: "Zen shared key", envVar: "OPENCODE_API_KEY", provider: "opencode", modelName: "zen-shared", model: "kimi-k3"},
 		{name: "Zen override key", envVar: "OPENCODE_ZEN_API_KEY", provider: "opencode", modelName: "zen-paid", model: "kimi-k3"},
 	} {

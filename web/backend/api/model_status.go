@@ -86,7 +86,7 @@ func (s *modelProbeCacheState) resetForTest() {
 
 func hasModelConfiguration(m *config.ModelConfig) bool {
 	protocol, modelID := splitModel(m)
-	if (protocol == "opencode" || protocol == "opencode-go") && !providers.IsSupportedOpenCodeModel(protocol, modelID) {
+	if protocol == "opencode" && !providers.IsSupportedOpenCodeModel(protocol, modelID) {
 		return false
 	}
 	authMethod := strings.ToLower(strings.TrimSpace(m.AuthMethod))
@@ -452,6 +452,9 @@ func modelProbeBackoffDelay(base, maxDelay time.Duration, streak int) time.Durat
 }
 
 func modelProbeAPIBase(m *config.ModelConfig) string {
+	if modelProtocol(m) == "opencode-go" {
+		return normalizeModelProbeAPIBase(providers.ResolveAPIBase(m))
+	}
 	if apiBase := strings.TrimSpace(m.APIBase); apiBase != "" {
 		return normalizeModelProbeAPIBase(apiBase)
 	}

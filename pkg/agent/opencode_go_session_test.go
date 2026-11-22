@@ -87,13 +87,13 @@ func TestOpenCodeGoFallbackWithEnvironmentKeyGetsItsOwnTransport(t *testing.T) {
 		},
 		ModelList: []*config.ModelConfig{
 			{ModelName: "go-kimi", Provider: "opencode-go", Model: "kimi-k3", Enabled: true},
-			{ModelName: "go-qwen", Provider: "opencode-go", Model: "qwen3.8-flash", Enabled: true},
+			{ModelName: "go-messages", Provider: "opencode-go", Model: "new-messages-model", APIFormat: "messages", Enabled: true},
 		},
 	}
 	primaryCandidate := providers.FallbackCandidate{Provider: "opencode-go", Model: "kimi-k3"}
 	fallbackCandidate := providers.FallbackCandidate{
 		Provider:    "opencode-go",
-		Model:       "qwen3.8-flash",
+		Model:       "new-messages-model",
 		ConfigIndex: 2,
 	}
 	primary := &sessionKeyCaptureProvider{}

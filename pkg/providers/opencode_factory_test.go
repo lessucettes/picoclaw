@@ -126,8 +126,8 @@ func TestOpenCodeProviderMetadataKeepsZenAndGoBasesSeparate(t *testing.T) {
 	if got := DefaultAPIBaseForProtocol("opencode"); got != "https://opencode.ai/zen/v1" {
 		t.Fatalf("opencode API base = %q, want https://opencode.ai/zen/v1", got)
 	}
-	if got := DefaultAPIBaseForProtocol("opencode-go"); got != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("opencode-go API base = %q, want https://opencode.ai/zen/go/v1", got)
+	if got := DefaultAPIBaseForProtocol("opencode-go"); got != "https://opencode.ai/inference/go/openai/v1" {
+		t.Fatalf("opencode-go API base = %q, want https://opencode.ai/inference/go/openai/v1", got)
 	}
 
 	var zenFound, goFound bool
@@ -136,7 +136,7 @@ func TestOpenCodeProviderMetadataKeepsZenAndGoBasesSeparate(t *testing.T) {
 		case "opencode":
 			zenFound = option.SupportsFetch && option.CreateAllowed && option.DefaultAPIBase == "https://opencode.ai/zen/v1"
 		case "opencode-go":
-			goFound = option.SupportsFetch && option.CreateAllowed && option.DefaultAPIBase == "https://opencode.ai/zen/go/v1"
+			goFound = option.SupportsFetch && option.CreateAllowed && len(option.CommonModels) == 0 && option.DefaultAPIBase == "https://opencode.ai/inference/go/openai/v1"
 		}
 	}
 	if !zenFound || !goFound {
@@ -258,16 +258,11 @@ func TestOpenCodeZenFactoryRejectsSystemOneWithoutAnAPIKey(t *testing.T) {
 	}
 }
 
-func TestOpenCodeZenModelFamiliesStaySeparateFromOpenCodeGo(t *testing.T) {
+func TestOpenCodeZenStillRequiresVerifiedModelFamilies(t *testing.T) {
 	if got := openCodeZenEndpointFamily("minimax-m3"); got != "chat" {
 		t.Fatalf("Zen minimax-m3 family = %q, want chat", got)
 	}
-	if got := openCodeGoEndpointFamily("minimax-m3"); got != "messages" {
-		t.Fatalf("Go minimax-m3 family = %q, want messages", got)
-	}
-	if openCodeZenEndpointFamily("longcat-2.0") != "" || openCodeGoEndpointFamily("big-pickle") != "" {
-		t.Fatal("provider-specific model IDs leaked across endpoint-family maps")
-	}
+
 	if got := openCodeZenEndpointFamily("unlisted-model"); got != "" {
 		t.Fatalf("unlisted model family = %q, want empty", got)
 	}

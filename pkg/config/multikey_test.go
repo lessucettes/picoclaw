@@ -191,6 +191,7 @@ func TestExpandMultiKeyModels_PreservesOtherFields(t *testing.T) {
 		Provider:            "openrouter",
 		Model:               "openai/gpt-4o",
 		APIBase:             "https://api.example.com",
+		APIFormat:           "messages",
 		Proxy:               "http://proxy:8080",
 		RPM:                 60,
 		MaxTokensField:      "max_completion_tokens",
@@ -205,6 +206,11 @@ func TestExpandMultiKeyModels_PreservesOtherFields(t *testing.T) {
 	result := expandMultiKeyModels(models)
 
 	// Check primary entry preserves all fields
+	for _, entry := range result {
+		if entry.APIFormat != "messages" {
+			t.Errorf("api_format for %q = %q, want messages", entry.ModelName, entry.APIFormat)
+		}
+	}
 	primary := result[1]
 	if primary.APIBase != "https://api.example.com" {
 		t.Errorf("expected api_base preserved, got %q", primary.APIBase)

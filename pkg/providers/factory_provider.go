@@ -82,6 +82,9 @@ func ResolveAPIBase(cfg *config.ModelConfig) string {
 		return strings.TrimRight(apiBase, "/")
 	}
 	protocol, _ := ExtractProtocol(cfg)
+	if protocol == "opencode-go" && strings.EqualFold(strings.TrimSpace(cfg.APIFormat), "messages") {
+		return "https://opencode.ai/inference/go/anthropic/v1"
+	}
 	return strings.TrimRight(getDefaultAPIBase(protocol), "/")
 }
 
@@ -271,9 +274,16 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		if apiKey == "" {
 			return nil, "", fmt.Errorf("api_key or OPENCODE_API_KEY is required for opencode-go")
 		}
-		family := openCodeGoEndpointFamily(modelID)
-		if family == "" {
-			return nil, "", fmt.Errorf("OpenCode Go model %q has no verified endpoint; check https://opencode.ai/docs/go/#endpoints", modelID)
+		if modelID == "" {
+			return nil, "", fmt.Errorf("model ID is required for opencode-go")
+		}
+		family := strings.ToLower(strings.TrimSpace(cfg.APIFormat))
+		switch family {
+		case "":
+			family = "chat"
+		case "chat", "messages", "responses":
+		default:
+			return nil, "", fmt.Errorf("invalid opencode-go api_format %q: use chat, messages, or responses", cfg.APIFormat)
 		}
 		base := ResolveAPIBase(cfg)
 		provider, err := newOpenCodeProvider("opencode-go", family, apiKey, base, userAgent, cfg)

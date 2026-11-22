@@ -96,15 +96,15 @@ func openCodeZenEndpointFamily(modelID string) string {
 	return openCodeZenFamilies[modelID]
 }
 
-// IsSupportedOpenCodeModel reports whether an OpenCode Zen or OpenCode Go
-// model has a verified conversational endpoint family.
+// IsSupportedOpenCodeModel checks Zen's conversational routes. OpenCode Go
+// accepts any non-empty ID; the upstream service decides its availability.
 func IsSupportedOpenCodeModel(provider, modelID string) bool {
 	switch NormalizeProvider(provider) {
 	case "opencode":
 		family := openCodeZenEndpointFamily(modelID)
 		return family != "" && family != "systemone"
 	case "opencode-go":
-		return openCodeGoEndpointFamily(modelID) != ""
+		return strings.TrimSpace(modelID) != ""
 	default:
 		return false
 	}

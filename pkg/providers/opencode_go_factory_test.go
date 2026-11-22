@@ -10,17 +10,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-func TestOpenCodeGoRejectsTermsRestrictedFreeModel(t *testing.T) {
-	t.Setenv("OPENCODE_API_KEY", "account-key")
-	t.Setenv("OPENCODE_ZEN_API_KEY", "zen-only-key")
-	cfg := &config.ModelConfig{Provider: "opencode-go", Model: "space-bunny-free"}
-	cfg.SetAPIKey("account-key")
-	_, _, err := CreateProviderFromConfig(cfg)
-	if err == nil || !strings.Contains(err.Error(), "no verified endpoint") {
-		t.Fatalf("CreateProviderFromConfig() error = %v, want unsupported model error", err)
-	}
-}
-
 func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -28,15 +17,12 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 		family   string
 		legacyID bool
 	}{
-		{name: "responses explicit", model: "grok-4.7", family: "responses"},
-		{name: "responses legacy", model: "grok-4.7", family: "responses", legacyID: true},
-		{name: "messages explicit", model: "qwen3.8-flash", family: "messages"},
-		{name: "messages model routed differently in regular Zen", model: "minimax-m3", family: "messages"},
-		{name: "messages legacy", model: "qwen3.8-flash", family: "messages", legacyID: true},
+		{name: "responses explicit", model: "new-responses-model", family: "responses"},
+		{name: "messages legacy", model: "new-messages-model", family: "messages", legacyID: true},
 		{name: "chat explicit", model: "kimi-k3", family: "chat"},
 		{name: "chat legacy", model: "kimi-k3", family: "chat", legacyID: true},
-		{name: "chat longcat free", model: "longcat-2.5-free", family: "chat"},
-		{name: "chat iceman contributor free", model: "iceman-contributor-free", family: "chat"},
+		{name: "unlisted case-sensitive ID", model: "Vendor/New-Model", family: "chat"},
+		{name: "unlisted legacy ID", model: "Future-Model", family: "chat", legacyID: true},
 	}
 
 	for _, tc := range tests {
@@ -46,7 +32,6 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 				"messages":  "messages",
 				"chat":      "chat/completions",
 			}[tc.family]
-			var requestModel string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost {
 					t.Errorf("request method = %q, want POST", r.Method)
@@ -74,7 +59,9 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Errorf("decode request body: %v", err)
 				} else if got, ok := body["model"].(string); ok {
-					requestModel = got
+					if got != tc.model {
+						t.Errorf("wire model = %q, want %q", got, tc.model)
+					}
 				} else {
 					t.Errorf("request model = %#v, want string %q", body["model"], tc.model)
 				}
@@ -104,6 +91,9 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 				APIBase:   server.URL + "/zen/go/v1",
 				UserAgent: "PicoClaw/factory-test",
 			}
+			if tc.family != "chat" {
+				cfg.APIFormat = tc.family
+			}
 			cfg.SetAPIKey("test-key")
 
 			provider, modelID, err := CreateProviderFromConfig(cfg)
@@ -126,21 +116,19 @@ func TestOpenCodeGoFactoryRoutesAllFamilies(t *testing.T) {
 			if response.Content != "ok" {
 				t.Errorf("response content = %q, want ok", response.Content)
 			}
-			if requestModel != tc.model {
-				t.Errorf("wire model = %q, want %q", requestModel, tc.model)
-			}
+
 		})
 	}
 }
 
-func TestOpenCodeGoFactoryRejectsUnverifiedAndKeylessModels(t *testing.T) {
+func TestOpenCodeGoFactoryRejectsInvalidConfiguration(t *testing.T) {
 	t.Setenv("OPENCODE_API_KEY", "")
-	t.Run("unverified model", func(t *testing.T) {
-		cfg := &config.ModelConfig{Provider: "opencode-go", Model: "omen-alpha"}
+	t.Run("empty model", func(t *testing.T) {
+		cfg := &config.ModelConfig{Provider: "opencode-go", Model: " "}
 		cfg.SetAPIKey("test-key")
 		_, _, err := CreateProviderFromConfig(cfg)
-		if err == nil || !strings.Contains(err.Error(), "no verified endpoint") {
-			t.Fatalf("CreateProviderFromConfig() error = %v, want unverified endpoint error", err)
+		if err == nil || !strings.Contains(err.Error(), "model ID is required") {
+			t.Fatalf("CreateProviderFromConfig() error = %v, want missing model error", err)
 		}
 	})
 
@@ -156,12 +144,12 @@ func TestOpenCodeGoFactoryRejectsUnverifiedAndKeylessModels(t *testing.T) {
 		}
 	})
 
-	t.Run("route message is useful", func(t *testing.T) {
-		cfg := &config.ModelConfig{Provider: "opencode-go", Model: "grok-4.7-pro"}
+	t.Run("invalid format", func(t *testing.T) {
+		cfg := &config.ModelConfig{Provider: "opencode-go", Model: "Future-Model", APIFormat: "bad"}
 		cfg.SetAPIKey("test-key")
 		_, _, err := CreateProviderFromConfig(cfg)
-		if err == nil || !strings.Contains(err.Error(), "https://opencode.ai/docs/go/#endpoints") {
-			t.Fatalf("CreateProviderFromConfig() error = %v, want endpoint documentation URL", err)
+		if err == nil || !strings.Contains(err.Error(), "invalid opencode-go api_format") {
+			t.Fatalf("CreateProviderFromConfig() error = %v, want invalid format error", err)
 		}
 	})
 }
@@ -231,9 +219,10 @@ func TestOpenCodeGoFactoryUsesEnvironmentKeyForResponses(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.ModelConfig{
-		Provider: "opencode-go",
-		Model:    "grok-4.7",
-		APIBase:  server.URL + "/zen/go/v1",
+		Provider:  "opencode-go",
+		Model:     "new-responses-model",
+		APIBase:   server.URL + "/zen/go/v1",
+		APIFormat: "responses",
 	}
 	provider, modelID, err := CreateProviderFromConfig(cfg)
 	if err != nil {
@@ -264,10 +253,11 @@ func TestOpenCodeGoFactoryUsesProxyForMessagesModels(t *testing.T) {
 	defer proxy.Close()
 
 	cfg := &config.ModelConfig{
-		Provider: "opencode-go",
-		Model:    "qwen3.8-flash",
-		APIBase:  "http://opencode-go.invalid/zen/go/v1",
-		Proxy:    proxy.URL,
+		Provider:  "opencode-go",
+		Model:     "new-messages-model",
+		APIBase:   "http://opencode-go.invalid/zen/go/v1",
+		APIFormat: "messages",
+		Proxy:     proxy.URL,
 	}
 	cfg.SetAPIKey("proxy-test-key")
 	provider, modelID, err := CreateProviderFromConfig(cfg)

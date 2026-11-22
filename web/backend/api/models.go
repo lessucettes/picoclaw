@@ -42,6 +42,7 @@ type modelResponse struct {
 	Provider   string `json:"provider,omitempty"`
 	Model      string `json:"model"`
 	APIBase    string `json:"api_base,omitempty"`
+	APIFormat  string `json:"api_format,omitempty"`
 	APIKey     string `json:"api_key"`
 	Proxy      string `json:"proxy,omitempty"`
 	AuthMethod string `json:"auth_method,omitempty"`
@@ -623,6 +624,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Provider:            provider,
 			Model:               modelID,
 			APIBase:             m.APIBase,
+			APIFormat:           m.APIFormat,
 			APIKey:              maskAPIKey(m.APIKey()),
 			Proxy:               m.Proxy,
 			AuthMethod:          m.AuthMethod,
@@ -814,6 +816,9 @@ func (h *Handler) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["streaming"]; !ok {
 		mc.Streaming = cfg.ModelList[idx].Streaming
+	}
+	if _, ok := rawFields["api_format"]; !ok {
+		mc.APIFormat = cfg.ModelList[idx].APIFormat
 	}
 	// Preserve the existing Provider when the caller omits it. This keeps the
 	// update API backward-compatible for clients that haven't started sending
@@ -1272,7 +1277,7 @@ func fetchUpstreamModels(ctx context.Context, provider, apiBase, apiKey string) 
 
 func filterOpenCodeUpstreamModels(provider string, models []upstreamModel) []upstreamModel {
 	provider = providers.NormalizeProvider(provider)
-	if provider != "opencode" && provider != "opencode-go" {
+	if provider != "opencode" {
 		return models
 	}
 
