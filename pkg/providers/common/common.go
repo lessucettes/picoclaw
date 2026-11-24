@@ -10,6 +10,7 @@ package common
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,11 +68,19 @@ func NewHTTPClient(proxy string) *http.Client {
 // ApplySessionHeader sets a provider-specific session header from request options.
 // An explicitly configured header takes precedence over the session option.
 func ApplySessionHeader(header http.Header, options map[string]any, name string) {
-	if header == nil || name == "" || header.Get(name) != "" {
+	ApplySessionHeaderWithFallback(header, options, name, false)
+}
+
+// ApplySessionHeaderWithFallback also supplies a fresh opaque ID for a one-off
+// request when the selected provider requires a session header.
+func ApplySessionHeaderWithFallback(header http.Header, options map[string]any, name string, required bool) {
+	if header == nil || name == "" || strings.TrimSpace(header.Get(name)) != "" {
 		return
 	}
 	if key, ok := options["session_key"].(string); ok && strings.TrimSpace(key) != "" {
 		header.Set(name, strings.TrimSpace(key))
+	} else if required {
+		header.Set(name, "picoclaw-"+rand.Text())
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,7 +158,7 @@ func (p *Provider) buildRequestBody(
 
 	requestBody := map[string]any{
 		"model":    model,
-		"messages": common.SerializeMessages(p.prepareMessagesForRequest(messages)),
+		"messages": common.SerializeMessages(p.prepareMessagesForRequest(messages, model, len(tools) > 0)),
 	}
 
 	// When fallback uses a different provider (e.g. DeepSeek), that provider must not inject web_search_preview.
@@ -351,11 +352,19 @@ func (p *Provider) SupportsThinking() bool {
 	return strings.EqualFold(strings.TrimSpace(p.providerName), "deepseek") || isDeepSeekHost(p.apiBase)
 }
 
-func (p *Provider) prepareMessagesForRequest(messages []Message) []Message {
+func (p *Provider) prepareMessagesForRequest(messages []Message, model string, hasTools bool) []Message {
 	if len(messages) == 0 {
 		return nil
 	}
 
+	if p.providerName == "opencode-go" && hasTools {
+		switch model {
+		case "deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro":
+			// OpenCode relays native DeepSeek Chat requests. With tools, DeepSeek
+			// requires reasoning from prior turns, even if no tool was called then.
+			return slices.DeleteFunc(slices.Clone(messages), messageutil.IsTransientAssistantThoughtMessage)
+		}
+	}
 	if p.requiresToolRoundReasoningReplay() {
 		return filterReasoningReplayMessages(messages)
 	}
@@ -499,7 +508,7 @@ func (p *Provider) Chat(
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 	p.applyCustomHeaders(req)
-	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
+	common.ApplySessionHeaderWithFallback(req.Header, options, p.sessionHeaderName, p.providerName == "opencode-go")
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -572,7 +581,7 @@ func (p *Provider) ChatStreamEvents(
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 	p.applyCustomHeaders(req)
-	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
+	common.ApplySessionHeaderWithFallback(req.Header, options, p.sessionHeaderName, p.providerName == "opencode-go")
 
 	// Use a client without Timeout for streaming — the http.Client.Timeout covers
 	// the entire request lifecycle including body reads, which would kill long streams.

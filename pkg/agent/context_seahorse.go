@@ -79,6 +79,7 @@ func providerToCompleteFn(provider providers.LLMProvider, model string) seahorse
 				"max_tokens":       opts.MaxTokens,
 				"temperature":      opts.Temperature,
 				"prompt_cache_key": "seahorse",
+				"session_key":      opts.SessionKey,
 			},
 		)
 		if err != nil {

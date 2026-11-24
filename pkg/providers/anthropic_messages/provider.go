@@ -45,6 +45,7 @@ type Provider struct {
 	userAgent         string
 	customHeaders     map[string]string
 	sessionHeaderName string
+	requireSession    bool
 }
 
 // NewProvider creates a new Anthropic Messages API provider.
@@ -84,6 +85,12 @@ func NewProviderWithProxyAndHeaders(
 	if strings.TrimSpace(proxy) != "" {
 		p.httpClient.Transport = common.NewHTTPClient(strings.TrimSpace(proxy)).Transport
 	}
+	return p
+}
+
+// RequireSessionHeader enables one-off session IDs. Call it before use.
+func (p *Provider) RequireSessionHeader(required bool) *Provider {
+	p.requireSession = required
 	return p
 }
 
@@ -135,7 +142,7 @@ func (p *Provider) Chat(
 			req.Header.Set(name, value)
 		}
 	}
-	common.ApplySessionHeader(req.Header, options, p.sessionHeaderName)
+	common.ApplySessionHeaderWithFallback(req.Header, options, p.sessionHeaderName, p.requireSession)
 
 	// Execute request
 	resp, err := p.httpClient.Do(req)

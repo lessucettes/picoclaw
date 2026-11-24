@@ -98,15 +98,16 @@ func newOpenCodeProvider(
 	userAgent string,
 	cfg *config.ModelConfig,
 ) (LLMProvider, error) {
+	requireSession := providerName == "opencode-go"
 	switch family {
 	case "responses":
 		return openairesponses.NewProvider(
 			apiKey, apiBase, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders,
-		), nil
+		).RequireSessionHeader(requireSession), nil
 	case "messages":
 		return anthropicmessages.NewProviderWithProxyAndHeaders(
 			apiKey, apiBase, cfg.Proxy, userAgent, cfg.RequestTimeout, cfg.CustomHeaders, openCodeSessionHeaderName,
-		), nil
+		).RequireSessionHeader(requireSession), nil
 	case "chat":
 		return openai_compat.NewProvider(apiKey, apiBase, cfg.Proxy,
 			openai_compat.WithProviderName(providerName), openai_compat.WithUserAgent(userAgent),

@@ -23,6 +23,7 @@ type Provider struct {
 	key, base, userAgent string
 	client               *http.Client
 	headers              map[string]string
+	requireSession       bool
 }
 
 const openCodeSessionHeaderName = "x-opencode-session"
@@ -44,6 +45,12 @@ func NewProvider(key, base, proxy, userAgent string, timeoutSeconds int, headers
 
 func (p *Provider) GetDefaultModel() string {
 	return ""
+}
+
+// RequireSessionHeader enables one-off session IDs. Call it before use.
+func (p *Provider) RequireSessionHeader(required bool) *Provider {
+	p.requireSession = required
+	return p
 }
 
 func (p *Provider) Chat(
@@ -99,7 +106,7 @@ func (p *Provider) Chat(
 			request.Header.Set(name, value)
 		}
 	}
-	common.ApplySessionHeader(request.Header, options, openCodeSessionHeaderName)
+	common.ApplySessionHeaderWithFallback(request.Header, options, openCodeSessionHeaderName, p.requireSession)
 
 	response, err := p.client.Do(request)
 	if err != nil {

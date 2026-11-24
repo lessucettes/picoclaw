@@ -548,6 +548,16 @@ func shallowCloneLLMOptions(opts map[string]any) map[string]any {
 	return clone
 }
 
+// restoreLLMSessionKey keeps the turn's routing identity when a hook replaces
+// its option map, without overriding a session key explicitly supplied by the hook.
+func restoreLLMSessionKey(opts map[string]any, sessionKey string) map[string]any {
+	if key, _ := opts["session_key"].(string); strings.TrimSpace(key) == "" && sessionKey != "" {
+		opts = shallowCloneLLMOptions(opts)
+		opts["session_key"] = sessionKey
+	}
+	return opts
+}
+
 func hasMediaRefs(messages []providers.Message) bool {
 	for _, msg := range messages {
 		if len(msg.Media) > 0 {

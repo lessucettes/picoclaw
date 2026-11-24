@@ -457,8 +457,10 @@ func (al *AgentLoop) askSideQuestion(
 		"temperature":      agent.Temperature,
 		"prompt_cache_key": agent.ID + ":btw",
 	}
+	var sessionKey string
 	if opts != nil {
-		llmOpts["session_key"] = opts.SessionKey
+		sessionKey = opts.SessionKey
+		llmOpts["session_key"] = sessionKey
 	}
 
 	hookModelChanged := false
@@ -525,7 +527,7 @@ func (al *AgentLoop) askSideQuestion(
 				}
 				llmModel = llmReq.Model
 				messages = llmReq.Messages
-				llmOpts = llmReq.Options
+				llmOpts = restoreLLMSessionKey(llmReq.Options, sessionKey)
 				delete(llmOpts, "native_search")
 			}
 		case HookActionAbortTurn:

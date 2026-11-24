@@ -406,7 +406,7 @@ PicoClaw uses [Chat Completions](https://opencode.ai/docs/console/harnesses#base
 
 Set `api_format` in the model's config entry to select the protocol explicitly. `chat` (the default) and `responses` use `https://opencode.ai/inference/go/openai/v1`; `messages` uses `https://opencode.ai/inference/go/anthropic/v1`. If an existing entry relied on automatic routing to Messages or Responses, set `api_format` to keep that protocol. `api_base` overrides the default for the selected format. All three transports honor `proxy`.
 
-PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing; a matching entry in `custom_headers` overrides it. Chat Completions supports the existing SSE streaming path; Messages and Responses are currently non-streaming. Native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses also ignores generic `temperature` and `thinking_level` settings and accepts the standard `max_tokens` option as `max_output_tokens`.
+PicoClaw sends the conversation session key in `x-opencode-session` for sticky routing, including when it summarizes the conversation. Standalone tool loops reuse their own session ID; one-off requests without a conversation get a fresh opaque ID. A nonblank `x-opencode-session` in `custom_headers` overrides the automatic value. Chat Completions supports the existing SSE streaming path; Messages and Responses are currently non-streaming. Native Messages and Responses transports do not forward generic `extra_body` or `max_tokens_field` overrides; Responses also ignores generic `temperature` and `thinking_level` settings and accepts the standard `max_tokens` option as `max_output_tokens`.
 
 **Ollama (local)**
 

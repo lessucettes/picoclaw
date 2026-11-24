@@ -8,9 +8,12 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"runtime/debug"
+	"strings"
 	"sync"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
@@ -49,6 +52,14 @@ func RunToolLoop(
 	iteration := 0
 	var finalContent string
 
+	llmOpts := config.LLMOptions
+	if key, _ := llmOpts["session_key"].(string); strings.TrimSpace(key) == "" {
+		// A standalone tool loop is one conversation, not one session per HTTP request.
+		llmOpts = make(map[string]any, len(config.LLMOptions)+1)
+		maps.Copy(llmOpts, config.LLMOptions)
+		llmOpts["session_key"] = "picoclaw-toolloop-" + rand.Text()
+	}
+
 	for iteration < config.MaxIterations {
 		iteration++
 
@@ -64,13 +75,7 @@ func RunToolLoop(
 			providerToolDefs = config.Tools.ToProviderDefs()
 		}
 
-		// 2. Set default LLM options
-		llmOpts := config.LLMOptions
-		if llmOpts == nil {
-			llmOpts = map[string]any{}
-		}
-
-		// 3. Resolve media:// refs and Call LLM.
+		// 2. Resolve media:// refs and call the LLM.
 		// Tools like load_image produce media:// refs in their result messages.
 		// Without this step, the LLM would receive raw "media://uuid" strings
 		// instead of base64-encoded image data URLs.
@@ -129,8 +134,9 @@ func RunToolLoop(
 
 		// 6. Build assistant message with tool calls
 		assistantMsg := providers.Message{
-			Role:    "assistant",
-			Content: response.Content,
+			Role:             "assistant",
+			Content:          response.Content,
+			ReasoningContent: response.ReasoningContent,
 		}
 		for _, tc := range normalizedToolCalls {
 			argumentsJSON, err := json.Marshal(tc.Arguments)

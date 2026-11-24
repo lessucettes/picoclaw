@@ -188,6 +188,13 @@ func TestCompactLeafNoCandidate(t *testing.T) {
 func TestCompactCondensed(t *testing.T) {
 	ce, s, convID := newTestCompactionEngine(t)
 	ctx := context.Background()
+	const sessionKey = "test:compact"
+	ce.complete = func(ctx context.Context, prompt string, opts CompleteOptions) (string, error) {
+		if opts.SessionKey != sessionKey {
+			t.Errorf("condensed completion session = %q, want %q", opts.SessionKey, sessionKey)
+		}
+		return mockCompleteFn(ctx, prompt, opts)
+	}
 
 	// Create enough leaf summaries and fresh messages to enable condensation
 	leafIDs := make([]string, CondensedMinFanout)
@@ -216,7 +223,10 @@ func TestCompactCondensed(t *testing.T) {
 	}
 
 	// Compact with force to trigger condensation
-	_, err := ce.Compact(ctx, convID, CompactInput{Force: true})
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+	_, err := ce.Compact(withCompactionSession(turnCtx, sessionKey), convID, CompactInput{Budget: nil, Force: true})
+	cancelTurn()
 	if err != nil {
 		t.Fatalf("Compact: %v", err)
 	}

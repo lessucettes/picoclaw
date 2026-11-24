@@ -31,6 +31,7 @@ type CompleteOptions struct {
 	Model       string
 	MaxTokens   int
 	Temperature float64
+	SessionKey  string
 }
 
 // IngestResult is the result of message ingestion.
@@ -343,7 +344,7 @@ func (e *Engine) Compact(ctx context.Context, sessionKey string, input CompactIn
 	}
 
 	e.initCompactionOnce()
-	return e.compaction.Compact(ctx, conv.ConversationID, input)
+	return e.compaction.Compact(withCompactionSession(ctx, sessionKey), conv.ConversationID, input)
 }
 
 // CompactUntilUnder aggressively compacts until context is under budget.
@@ -359,7 +360,7 @@ func (e *Engine) CompactUntilUnder(ctx context.Context, sessionKey string, budge
 	}
 
 	e.initCompactionOnce()
-	return e.compaction.CompactUntilUnder(ctx, conv.ConversationID, budget)
+	return e.compaction.CompactUntilUnder(withCompactionSession(ctx, sessionKey), conv.ConversationID, budget)
 }
 
 // initCompactionOnce lazily initializes the compaction engine.

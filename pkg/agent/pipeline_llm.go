@@ -100,7 +100,7 @@ func (p *Pipeline) CallLLM(
 				exec.llmModel = llmReq.Model
 				exec.callMessages = llmReq.Messages
 				exec.providerToolDefs = filterToolsByTurnProfile(llmReq.Tools, ts.profile)
-				exec.llmOpts = llmReq.Options
+				exec.llmOpts = restoreLLMSessionKey(llmReq.Options, ts.sessionKey)
 				if strings.TrimSpace(exec.llmModel) != "" && exec.llmModel != prevModel {
 					if err := p.applyBeforeLLMModelRewrite(ts, exec); err != nil {
 						return ControlBreak, err

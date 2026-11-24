@@ -42,6 +42,17 @@ func (e *CompactionEngine) Close() {
 	}
 }
 
+type compactionSessionKey struct{}
+
+func withCompactionSession(ctx context.Context, sessionKey string) context.Context {
+	return context.WithValue(ctx, compactionSessionKey{}, sessionKey)
+}
+
+func compactionSession(ctx context.Context) string {
+	sessionKey, _ := ctx.Value(compactionSessionKey{}).(string)
+	return sessionKey
+}
+
 // Compact runs leaf compaction (sync) and optionally condensed compaction.
 func (e *CompactionEngine) Compact(ctx context.Context, convID int64, input CompactInput) (*CompactResult, error) {
 	result := &CompactResult{}
@@ -77,9 +88,11 @@ func (e *CompactionEngine) Compact(ctx context.Context, convID int64, input Comp
 	if input.Force || (tokensBefore > budget && budget > 0) {
 		// Launch async condensed compaction with dedup
 		if _, loaded := e.condensing.LoadOrStore(convID, struct{}{}); !loaded {
+			// Keep the conversation key, but not the foreground turn's cancellation.
+			backgroundCtx := withCompactionSession(e.shutdownCtx, compactionSession(ctx))
 			go func() {
 				defer e.condensing.Delete(convID)
-				e.runCondensedLoop(e.shutdownCtx, convID)
+				e.runCondensedLoop(backgroundCtx, convID)
 			}()
 		}
 	}
@@ -567,6 +580,19 @@ func (e *CompactionEngine) selectOldestChunkAtDepth(
 	return chunk, nil
 }
 
+func (e *CompactionEngine) completeSummary(
+	ctx context.Context,
+	prompt string,
+	maxTokens int,
+	temperature float64,
+) (string, error) {
+	var opts CompleteOptions
+	opts.MaxTokens = maxTokens
+	opts.Temperature = temperature
+	opts.SessionKey = compactionSession(ctx)
+	return e.complete(ctx, prompt, opts)
+}
+
 // generateLeafSummary calls the LLM to generate a leaf summary with 3-level escalation.
 // Level 1: normal LLM prompt. Level 2: aggressive prompt. Level 3: deterministic truncation.
 func (e *CompactionEngine) generateLeafSummary(
@@ -584,19 +610,13 @@ func (e *CompactionEngine) generateLeafSummary(
 
 	// Level 1: normal prompt
 	prompt := buildLeafSummaryPrompt(sourceText, previousSummary, targetTokens)
-	content, err := e.complete(ctx, prompt, CompleteOptions{
-		MaxTokens:   LeafTargetTokens * 2,
-		Temperature: 0.3,
-	})
+	content, err := e.completeSummary(ctx, prompt, LeafTargetTokens*2, 0.3)
 	if err != nil {
 		return "", err
 	}
 	if content == "" {
 		// Retry with temperature=0
-		content, err = e.complete(ctx, prompt, CompleteOptions{
-			MaxTokens:   LeafTargetTokens * 2,
-			Temperature: 0,
-		})
+		content, err = e.completeSummary(ctx, prompt, LeafTargetTokens*2, 0)
 		if err != nil {
 			return "", err
 		}
@@ -610,19 +630,13 @@ func (e *CompactionEngine) generateLeafSummary(
 	// Level 2: aggressive prompt
 	aggressiveTarget := minInt(640, int(float64(inputTokens)*0.20))
 	aggressivePrompt := buildAggressiveLeafSummaryPrompt(sourceText, previousSummary, aggressiveTarget)
-	content, err = e.complete(ctx, aggressivePrompt, CompleteOptions{
-		MaxTokens:   aggressiveTarget * 2,
-		Temperature: 0.3,
-	})
+	content, err = e.completeSummary(ctx, aggressivePrompt, aggressiveTarget*2, 0.3)
 	if err != nil {
 		return "", err
 	}
 	if content == "" {
 		// Retry with temperature=0
-		content, err = e.complete(ctx, aggressivePrompt, CompleteOptions{
-			MaxTokens:   aggressiveTarget * 2,
-			Temperature: 0,
-		})
+		content, err = e.completeSummary(ctx, aggressivePrompt, aggressiveTarget*2, 0)
 		if err != nil {
 			return "", err
 		}
@@ -647,18 +661,12 @@ func (e *CompactionEngine) generateCondensedSummary(ctx context.Context, summari
 
 	// Level 1: normal prompt
 	prompt := buildCondensedSummaryPrompt(sourceText, targetTokens)
-	content, err := e.complete(ctx, prompt, CompleteOptions{
-		MaxTokens:   CondensedTargetTokens * 2,
-		Temperature: 0.3,
-	})
+	content, err := e.completeSummary(ctx, prompt, CondensedTargetTokens*2, 0.3)
 	if err != nil {
 		return "", err
 	}
 	if content == "" {
-		content, err = e.complete(ctx, prompt, CompleteOptions{
-			MaxTokens:   CondensedTargetTokens * 2,
-			Temperature: 0,
-		})
+		content, err = e.completeSummary(ctx, prompt, CondensedTargetTokens*2, 0)
 		if err != nil {
 			return "", err
 		}
@@ -670,10 +678,7 @@ func (e *CompactionEngine) generateCondensedSummary(ctx context.Context, summari
 	// Level 2: aggressive prompt
 	aggressiveTarget := minInt(640, int(float64(inputTokens)*0.20))
 	aggressivePrompt := buildCondensedSummaryPrompt(sourceText, aggressiveTarget)
-	content, err = e.complete(ctx, aggressivePrompt, CompleteOptions{
-		MaxTokens:   aggressiveTarget * 2,
-		Temperature: 0.3,
-	})
+	content, err = e.completeSummary(ctx, aggressivePrompt, aggressiveTarget*2, 0.3)
 	if err != nil {
 		return "", err
 	}
